@@ -1,4 +1,6 @@
 #include <cctype>
+#include <fstream>
+#include <sstream>
 
 #include "goldberg.hpp"
 
@@ -6,6 +8,22 @@ namespace goldberg {
 
 const std::shared_ptr<Value> t(new True());
 const std::shared_ptr<Value> nil(new Nil());
+
+std::string Number::to_string () const {
+  std::ostringstream out;
+  out << value_;
+  return out.str();
+}
+
+std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
+  std::istringstream in(string);
+  return load(in, filename);
+}
+
+std::shared_ptr<Value> Interpreter::load (const std::string& filename) {
+  std::ifstream in(filename);
+  return load(in, filename);
+}
 
 std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& filename) {
   location loc{std::make_shared<std::string>(filename), 1, 1};
@@ -18,7 +36,42 @@ std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& f
 }
 
 std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc) {
-  return nil;
+  return parse(in, loc, lex(in, loc));
+}
+
+std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, const lexeme& token) {
+  switch (token.character) {
+    case '.':
+      throw script_error("Unexpected '.'", token.loc);
+
+    case '(':
+      return parse_rest(in, loc);
+
+    case ')':
+      throw script_error("Mismatched ')'", token.loc);
+
+    case '\'':
+      return std::shared_ptr<Value>(new Pair(get_symbol("quote"), std::shared_ptr<Value>(new Pair(parse(in, loc), nil))));
+
+    default:
+      return token.value;
+  }
+}
+
+std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc) {
+  auto token = lex(in, loc);
+  switch (token.character) {
+    case ')':
+      return nil;
+
+    case '.':
+      return parse(in, loc);
+
+    default: {
+      auto first = parse(in, loc, token);
+      return std::shared_ptr<Value>(new Pair(first, parse_rest(in, loc)));
+    }
+  }
 }
 
 lexeme Interpreter::lex (std::istream& in, location& loc) {
@@ -174,6 +227,14 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& value) {
   return value;
+}
+
+std::shared_ptr<Value> Interpreter::get_symbol (const std::string& value) {
+  auto& symbol = symbols_[value];
+  if (!symbol.expired()) return std::shared_ptr<Value>(symbol);
+  std::shared_ptr<Value> new_symbol(new Symbol(value));
+  symbol = new_symbol;
+  return new_symbol;
 }
 
 }

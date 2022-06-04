@@ -2,7 +2,6 @@
 #define GOLDBERG_H
 
 #include <exception>
-#include <fstream>
 #include <istream>
 #include <memory>
 #include <string>
@@ -46,7 +45,7 @@ public:
 
   Number (double value) : value_(value) {}
 
-  std::string to_string () const override { return std::to_string(value_); }
+  std::string to_string () const override;
 
 private:
 
@@ -109,28 +108,24 @@ struct lexeme {
 class Interpreter {
 public:
 
-  std::shared_ptr<Value> load (const std::string& filename) {
-    std::ifstream in(filename);
-    return load(in, filename);
-  }
+  std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
+
+  std::shared_ptr<Value> load (const std::string& filename);
 
   std::shared_ptr<Value> load (std::istream& in, const std::string& filename);
 
 private:
 
   std::shared_ptr<Value> parse (std::istream& in, location& loc);
+  std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);
+
+  std::shared_ptr<Value> parse_rest (std::istream& in, location& loc);
 
   lexeme lex (std::istream& in, location& loc);
 
   std::shared_ptr<Value> evaluate (const std::shared_ptr<Value>& value);
 
-  std::shared_ptr<Value> get_symbol (const std::string& value) {
-    auto& symbol = symbols_[value];
-    if (!symbol.expired()) return std::shared_ptr<Value>(symbol);
-    std::shared_ptr<Value> new_symbol(new Symbol(value));
-    symbol = new_symbol;
-    return new_symbol;
-  }
+  std::shared_ptr<Value> get_symbol (const std::string& value);
 
   std::unordered_map<std::string, std::weak_ptr<Value>> symbols_;
 };

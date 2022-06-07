@@ -6,13 +6,21 @@
 
 namespace goldberg {
 
-const std::shared_ptr<Value> t(new True());
-const std::shared_ptr<Value> nil(new Nil());
+static std::shared_ptr<Value> quote_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  return args->require_1();
+}
 
-std::string Number::to_string () const {
-  std::ostringstream out;
-  out << value_;
-  return out.str();
+static std::shared_ptr<Value> if_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  return args->require_1();
+}
+
+Interpreter::Interpreter () {
+  call_stack_.push_back({std::make_shared<invocation>()});
+
+  register_builtin("nil", std::shared_ptr<Value>(new Nil()));
+  register_builtin("t", std::shared_ptr<Value>(new True()));
+  register_native_operator("quote", quote_op);
+  register_native_operator("if", if_op);
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
@@ -27,12 +35,20 @@ std::shared_ptr<Value> Interpreter::load (const std::string& filename) {
 
 std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& filename) {
   location loc{std::make_shared<std::string>(filename), 1, 1};
-  auto last_result = nil;
+  auto last_result = std::shared_ptr<Value>(new Nil(std::make_shared<location>(loc)));
   while (in) {
     auto result = evaluate(parse(in, loc));
     if (*result) last_result = result;
   }
   return last_result;
+}
+
+void Interpreter::register_native_operator (const std::string& name, NativeOperatorPointer pointer) {
+  register_builtin(name, std::shared_ptr<Value>(new NativeOperator(pointer)));
+}
+
+void Interpreter::register_builtin (const std::string& name, const std::shared_ptr<Value>& value) {
+  call_stack_.front().context->lexical_vars[get_symbol_value(name)] = value;
 }
 
 std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc) {
@@ -50,9 +66,13 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
     case ')':
       throw script_error("Mismatched ')'", token.loc);
 
-    case '\'':
-      return std::shared_ptr<Value>(new Pair(get_symbol("quote"), std::shared_ptr<Value>(new Pair(parse(in, loc), nil))));
-
+    case '\'': {
+      auto token_loc = std::make_shared<location>(token.loc);
+      return std::shared_ptr<Value>(new Pair(
+        std::shared_ptr<Value>(new Symbol(get_symbol_value("quote"), token_loc)),
+        std::shared_ptr<Value>(new Pair(parse(in, loc), std::shared_ptr<Value>(new Nil(token_loc)), token_loc)),
+        token_loc));
+    }
     default:
       return token.value;
   }
@@ -62,14 +82,14 @@ std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc)
   auto token = lex(in, loc);
   switch (token.character) {
     case ')':
-      return nil;
+      return std::shared_ptr<Value>(new Nil(std::make_shared<location>(token.loc)));
 
     case '.':
       return parse(in, loc);
 
     default: {
       auto first = parse(in, loc, token);
-      return std::shared_ptr<Value>(new Pair(first, parse_rest(in, loc)));
+      return std::shared_ptr<Value>(new Pair(first, parse_rest(in, loc), first->loc()));
     }
   }
 }
@@ -157,7 +177,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
               break;
 
             case '"': {
-              lexeme token{0, std::shared_ptr<Value>(new String(value)), start};
+              lexeme token{0, std::shared_ptr<Value>(new String(value, std::make_shared<location>(start))), start};
               loc.column++;
               return token;
             }
@@ -172,7 +192,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
       case '(':
       case ')':
       case '\'': {
-        lexeme token{static_cast<char>(ch), nil, loc};
+        lexeme token{static_cast<char>(ch), nullptr, loc};
         loc.column++;
         return token;
       }
@@ -180,7 +200,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         int next = in.get();
         in.unget();
         if (!std::isdigit(next)) { // if the next character is a digit, fall through to lex as number
-          lexeme token{'.', nil, loc};
+          lexeme token{'.', nullptr, loc};
           loc.column++;
           return token;
         }
@@ -217,24 +237,114 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         char first = value[0];
         char second = value.length() > 1 ? value[1] : 0;
         return first == '.' || std::isdigit(first) || (first == '+' || first == '-') && (second == '.' || std::isdigit(second))
-          ? lexeme{0, std::shared_ptr<Value>(new Number(std::stod(value))), start}
-          : lexeme{0, get_symbol(value), start};
+          ? lexeme{0, std::shared_ptr<Value>(new Number(std::stod(value), std::make_shared<location>(start))), start}
+          : lexeme{0, std::shared_ptr<Value>(new Symbol(get_symbol_value(value), std::make_shared<location>(start))), start};
       }
     }
   }
-  return {0, nil, loc};
+  return {0, std::shared_ptr<Value>(new Nil(std::make_shared<location>(loc))), loc};
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& value) {
-  return value;
+  return value->evaluate(*this, value);
 }
 
-std::shared_ptr<Value> Interpreter::get_symbol (const std::string& value) {
-  auto& symbol = symbols_[value];
-  if (!symbol.expired()) return std::shared_ptr<Value>(symbol);
-  std::shared_ptr<Value> new_symbol(new Symbol(value));
-  symbol = new_symbol;
-  return new_symbol;
+std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& value) {
+  auto& symbol_value = symbol_values_[value];
+  if (!symbol_value.expired()) return std::shared_ptr<std::string>(symbol_value);
+  auto new_symbol_value = std::make_shared<std::string>(value);
+  symbol_value = new_symbol_value;
+  return new_symbol_value;
+}
+
+std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& symbol_value) const {
+  auto it = call_stack_.rbegin();
+  auto lexical_value = it->context->lookup(symbol_value);
+  if (lexical_value) return lexical_value;
+
+  for (; it != call_stack_.rend(); ++it) {
+    auto value = it->dynamic_vars.find(symbol_value);
+    if (value != it->dynamic_vars.end()) return value->second;
+  }
+  return std::shared_ptr<Value>();
+}
+
+std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return evaluate(interpreter, self);
+}
+
+std::shared_ptr<Value> Value::invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const {
+  throw script_error("Cannot invoke value " + source->to_string(), *source->loc());
+}
+
+std::shared_ptr<Value> Value::require_1 () const {
+  throw script_error("Exactly one argument required", *loc());
+}
+
+std::string Number::to_string () const {
+  std::ostringstream out;
+  out << value_;
+  return out.str();
+}
+
+std::string String::to_string () const {
+  std::string string(1, '"');
+  for (char ch : value_) {
+    switch (ch) {
+      case '\n':
+        string += "\\n";
+        break;
+
+      case '\\':
+      case '"':
+        string += '\\'; // fall through
+
+      default:
+        string += ch;
+        break;
+    }
+  }
+  return string += '"';
+}
+
+std::shared_ptr<Value> Symbol::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto result = interpreter.lookup(value_);
+  if (result) return result;
+  throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
+}
+
+std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto fn = left_->evaluate(interpreter, left_);
+  return fn->invoke(interpreter, right_, left_);
+}
+
+std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto left = left_->evaluate(interpreter, left_);
+  auto right = right_->evaluate_rest(interpreter, right_);
+  return std::shared_ptr<Value>(new Pair(left, right, loc()));
+}
+
+std::shared_ptr<Value> Pair::require_1 () const {
+  if (!right_->is_nil()) Value::require_1(); // throw exception
+  return left_;
+}
+
+std::string NativeOperator::to_string () const {
+  std::ostringstream out;
+  out << "NativeOperator" << std::hex << reinterpret_cast<unsigned long long>(pointer_);
+  return out.str();
+}
+
+std::shared_ptr<Value> NativeOperator::invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const {
+  return pointer_(interpreter, args);
+}
+
+std::shared_ptr<Value> invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {
+  auto value = lexical_vars.find(symbol_value);
+  if (value != lexical_vars.end()) return value->second;
+  return parent ? parent->lookup(symbol_value) : std::shared_ptr<Value>();
 }
 
 }

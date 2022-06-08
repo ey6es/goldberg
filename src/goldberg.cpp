@@ -7,11 +7,23 @@
 namespace goldberg {
 
 static std::shared_ptr<Value> quote_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-  return args->require_1();
+  auto pair = args->require_pair(args);
+  pair->right()->require_nil();
+  return pair->left();
 }
 
 static std::shared_ptr<Value> if_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-  return args->require_1();
+  auto cond_pair = args->require_pair(args);
+  auto true_pair = cond_pair->right()->require_pair(cond_pair->right());
+  auto false_expr = true_pair->right();
+  if (!false_expr->is_nil()) {
+    auto false_pair = false_expr->require_pair(false_expr);
+    false_expr = false_pair->left();
+    false_pair->right()->require_nil();
+  }
+  return *cond_pair->left()->evaluate(interpreter, cond_pair->left())
+    ? true_pair->left()->evaluate(interpreter, true_pair->left())
+    : false_expr->evaluate(interpreter, false_expr);
 }
 
 Interpreter::Interpreter () {
@@ -269,6 +281,14 @@ std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& 
   return std::shared_ptr<Value>();
 }
 
+void Value::require_nil () const {
+  if (!is_nil()) throw script_error("Unexpected argument", *loc());
+}
+
+std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) const {
+  throw script_error("Expected argument", *loc());
+}
+
 std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   return evaluate(interpreter, self);
 }
@@ -276,10 +296,6 @@ std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std
 std::shared_ptr<Value> Value::invoke (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const {
   throw script_error("Cannot invoke value " + source->to_string(), *source->loc());
-}
-
-std::shared_ptr<Value> Value::require_1 () const {
-  throw script_error("Exactly one argument required", *loc());
 }
 
 std::string Number::to_string () const {
@@ -314,6 +330,10 @@ std::shared_ptr<Value> Symbol::evaluate (Interpreter& interpreter, const std::sh
   throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
 }
 
+std::shared_ptr<Pair> Pair::require_pair (const std::shared_ptr<Value>& self) const {
+  return std::static_pointer_cast<Pair>(self);
+}
+
 std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   auto fn = left_->evaluate(interpreter, left_);
   return fn->invoke(interpreter, right_, left_);
@@ -323,11 +343,6 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
   auto left = left_->evaluate(interpreter, left_);
   auto right = right_->evaluate_rest(interpreter, right_);
   return std::shared_ptr<Value>(new Pair(left, right, loc()));
-}
-
-std::shared_ptr<Value> Pair::require_1 () const {
-  if (!right_->is_nil()) Value::require_1(); // throw exception
-  return left_;
 }
 
 std::string NativeOperator::to_string () const {

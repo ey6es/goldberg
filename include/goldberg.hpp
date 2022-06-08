@@ -62,6 +62,8 @@ struct location {
   std::string to_string () const { return *filename + ' ' + std::to_string(line) + ':' + std::to_string(column); }
 };
 
+class Pair;
+
 class Value {
 public:
 
@@ -75,6 +77,10 @@ public:
 
   virtual bool is_nil () const { return false; }
 
+  void require_nil () const;
+
+  virtual std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
+
   virtual std::string to_string () const = 0;
 
   virtual std::string to_rest_string () const { return " . " + to_string(); }
@@ -85,8 +91,6 @@ public:
 
   virtual std::shared_ptr<Value> invoke (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const;
-
-  virtual std::shared_ptr<Value> require_1 () const;
 
 private:
 
@@ -158,6 +162,11 @@ public:
   Pair (const std::shared_ptr<Value>& left, const std::shared_ptr<Value>& right, const std::shared_ptr<location>& loc = nullptr)
     : Value(loc), left_(left), right_(right) {}
 
+  const std::shared_ptr<Value>& left () const { return left_; }
+  const std::shared_ptr<Value>& right () const { return right_; }
+
+  std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const override;
+
   std::string to_string () const override { return '(' + left_->to_string() + right_->to_rest_string() + ')'; }
 
   std::string to_rest_string () const override { return ' ' + left_->to_string() + right_->to_rest_string(); }
@@ -165,8 +174,6 @@ public:
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
   std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
-
-  std::shared_ptr<Value> require_1 () const override;
 
 private:
 

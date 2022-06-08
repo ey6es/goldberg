@@ -28,3 +28,11 @@ TEST_CASE("expressions can be parsed", "[parse]") {
   REQUIRE(interpreter.evaluate("'foobar")->to_string() == "foobar");
   REQUIRE(interpreter.evaluate("'(foo 1.25 \"bar\" (baz))")->to_string() == "(foo 1.25 \"bar\" (baz))");
 }
+
+TEST_CASE("expressions can be evaluated", "[evaluate]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(if t 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(if nil 1)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(if (if nil 1) 1 2)")->to_string() == "2");
+}

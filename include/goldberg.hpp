@@ -12,11 +12,11 @@ namespace goldberg {
 
 class Interpreter;
 class Value;
+template<typename T> class NativeOperator;
+template<typename T> class NativeFunction;
 struct lexeme;
 struct location;
 struct stack_frame;
-
-typedef std::shared_ptr<Value> (*NativeOperatorPointer)(Interpreter&, const std::shared_ptr<Value>&);
 
 class Interpreter {
 public:
@@ -32,7 +32,17 @@ private:
 
   friend class Symbol;
 
-  void register_native_operator (const std::string& name, NativeOperatorPointer pointer);
+  void register_builtins ();
+
+  template<typename T>
+  void register_native_operator (const std::string& name, T function) {
+    register_builtin(name, std::shared_ptr<Value>(new NativeOperator<T>(name, function)));
+  }
+
+  template<typename T>
+  void register_native_function (const std::string& name, T function) {
+    register_builtin(name, std::shared_ptr<Value>(new NativeFunction<T>(name, function)));
+  }
 
   void register_builtin (const std::string& name, const std::shared_ptr<Value>& value);
 
@@ -79,6 +89,8 @@ public:
 
   void require_nil () const;
 
+  virtual double require_number (const location& loc) const;
+
   virtual std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
 
   virtual std::string to_string () const = 0;
@@ -121,6 +133,8 @@ class Number : public Value {
 public:
 
   explicit Number (double value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
+
+  double require_number (const location& loc) const override { return value_; }
 
   std::string to_string () const override;
 
@@ -181,19 +195,48 @@ private:
   std::shared_ptr<Value> right_;
 };
 
-class NativeOperator : public Value {
+class NativeValue : public Value {
 public:
 
-  NativeOperator (NativeOperatorPointer pointer) : pointer_(pointer) {}
+  NativeValue (const std::string& name) : name_(name) {}
 
-  std::string to_string () const override;
-
-  std::shared_ptr<Value> invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const override;
+  std::string to_string () const override { return name_; }
 
 private:
 
-  NativeOperatorPointer pointer_;
+  std::string name_;
+};
+
+template<typename T>
+class NativeOperator : public NativeValue {
+public:
+
+  NativeOperator (const std::string& name, const T& function) : NativeValue(name), function_(function) {}
+
+  std::shared_ptr<Value> invoke (
+      Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const override {
+    return function_(interpreter, args);
+  }
+
+private:
+
+  T function_;
+};
+
+template<typename T>
+class NativeFunction : public NativeValue {
+public:
+
+  NativeFunction (const std::string& name, const T& function) : NativeValue(name), function_(function) {}
+
+  std::shared_ptr<Value> invoke (
+      Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const override {
+    return function_(interpreter, args->evaluate_rest(interpreter, args));
+  }
+
+private:
+
+  T function_;
 };
 
 struct invocation {

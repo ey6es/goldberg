@@ -18,7 +18,7 @@ enable_testing()
 include(CTest)
 include(Catch)
 
-add_library(goldberg src/goldberg.cpp)
+add_library(goldberg src/goldberg.cpp src/builtins.cpp)
 
 add_executable(interpreter_tests tests/interpreter.cpp)
 target_link_libraries(interpreter_tests PRIVATE Catch2::Catch2WithMain goldberg)

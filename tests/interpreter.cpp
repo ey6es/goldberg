@@ -35,4 +35,33 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(if t 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(if nil 1)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(if (if nil 1) 1 2)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(and)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(and 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(and nil 1)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(and 1 2)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(or)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(or nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(or nil nil 2)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(or nil 3 2)")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(+)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(+ 1.0)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(+ (+ 0.5 0.5) 1.5)")->to_string() == "2.5");
+
+  REQUIRE(interpreter.evaluate("(- 1.0)")->to_string() == "-1");
+  REQUIRE(interpreter.evaluate("(- 1.0 2)")->to_string() == "-1");
+  REQUIRE(interpreter.evaluate("(- (+ 0.5 0.5) 1.5)")->to_string() == "-0.5");
+
+  REQUIRE(interpreter.evaluate("(*)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(* 2.0)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(* (+ 1.5 1.5) 2)")->to_string() == "6");
+
+  REQUIRE(interpreter.evaluate("(/ 2.0)")->to_string() == "0.5");
+  REQUIRE(interpreter.evaluate("(/ (+ 1.5 1.5) 2)")->to_string() == "1.5");
+  REQUIRE(interpreter.evaluate("(/ 1 2 2)")->to_string() == "0.25");
+
+  REQUIRE(interpreter.evaluate("(not nil)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(not (null nil))")->to_string() == "nil");
 }

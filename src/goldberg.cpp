@@ -6,33 +6,8 @@
 
 namespace goldberg {
 
-static std::shared_ptr<Value> quote_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-  auto pair = args->require_pair(args);
-  pair->right()->require_nil();
-  return pair->left();
-}
-
-static std::shared_ptr<Value> if_op (Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-  auto cond_pair = args->require_pair(args);
-  auto true_pair = cond_pair->right()->require_pair(cond_pair->right());
-  auto false_expr = true_pair->right();
-  if (!false_expr->is_nil()) {
-    auto false_pair = false_expr->require_pair(false_expr);
-    false_expr = false_pair->left();
-    false_pair->right()->require_nil();
-  }
-  return *cond_pair->left()->evaluate(interpreter, cond_pair->left())
-    ? true_pair->left()->evaluate(interpreter, true_pair->left())
-    : false_expr->evaluate(interpreter, false_expr);
-}
-
-Interpreter::Interpreter () {
-  call_stack_.push_back({std::make_shared<invocation>()});
-
-  register_builtin("nil", std::shared_ptr<Value>(new Nil()));
-  register_builtin("t", std::shared_ptr<Value>(new True()));
-  register_native_operator("quote", quote_op);
-  register_native_operator("if", if_op);
+Interpreter::Interpreter () : call_stack_({{std::make_shared<invocation>()}}) {
+  register_builtins();
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
@@ -53,10 +28,6 @@ std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& f
     if (*result) last_result = result;
   }
   return last_result;
-}
-
-void Interpreter::register_native_operator (const std::string& name, NativeOperatorPointer pointer) {
-  register_builtin(name, std::shared_ptr<Value>(new NativeOperator(pointer)));
 }
 
 void Interpreter::register_builtin (const std::string& name, const std::shared_ptr<Value>& value) {
@@ -285,6 +256,10 @@ void Value::require_nil () const {
   if (!is_nil()) throw script_error("Unexpected argument", *loc());
 }
 
+double Value::require_number (const location& loc) const {
+  throw script_error("Expected number", loc);
+}
+
 std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) const {
   throw script_error("Expected argument", *loc());
 }
@@ -343,17 +318,6 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
   auto left = left_->evaluate(interpreter, left_);
   auto right = right_->evaluate_rest(interpreter, right_);
   return std::shared_ptr<Value>(new Pair(left, right, loc()));
-}
-
-std::string NativeOperator::to_string () const {
-  std::ostringstream out;
-  out << "NativeOperator" << std::hex << reinterpret_cast<unsigned long long>(pointer_);
-  return out.str();
-}
-
-std::shared_ptr<Value> NativeOperator::invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const {
-  return pointer_(interpreter, args);
 }
 
 std::shared_ptr<Value> invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {

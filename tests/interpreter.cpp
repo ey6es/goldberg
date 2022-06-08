@@ -64,4 +64,34 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
 
   REQUIRE(interpreter.evaluate("(not nil)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(not (null nil))")->to_string() == "nil");
+
+  REQUIRE(interpreter.evaluate("(= 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(= 0 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(= 0 1)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(= 0 0 0)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(< 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(< 0 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(< 0 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(< 1 2 3)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(> 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(> 0 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(> 1 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(> 3 2 1)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(<= 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 0 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 1 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(<= 1 2 2)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(>= 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(>= 0 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(>= 1 2)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(>= 3 2 2)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(/= 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(/= 0 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(/= 0 1 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(/= 0 1 2)")->to_string() == "t");
 }

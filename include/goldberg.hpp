@@ -14,12 +14,18 @@ class Interpreter;
 class Value;
 template<typename T> class NativeOperator;
 template<typename T> class NativeFunction;
+struct invocation;
 struct lexeme;
 struct location;
 struct stack_frame;
 
 class Interpreter {
 public:
+
+  static const std::shared_ptr<Value>& t () { return t_; }
+  static const std::shared_ptr<Value>& nil () { return nil_; }
+
+  static std::shared_ptr<std::string> static_symbol_value (const std::string& value);
 
   Interpreter ();
 
@@ -32,19 +38,12 @@ private:
 
   friend class Symbol;
 
-  void register_builtins ();
+  static std::shared_ptr<Value> t_;
+  static std::shared_ptr<Value> nil_;
 
-  template<typename T>
-  void register_native_operator (const std::string& name, T function) {
-    register_builtin(name, std::shared_ptr<Value>(new NativeOperator<T>(name, function)));
-  }
+  static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
 
-  template<typename T>
-  void register_native_function (const std::string& name, T function) {
-    register_builtin(name, std::shared_ptr<Value>(new NativeFunction<T>(name, function)));
-  }
-
-  void register_builtin (const std::string& name, const std::shared_ptr<Value>& value);
+  static std::shared_ptr<invocation> create_builtin_context ();
 
   std::shared_ptr<Value> parse (std::istream& in, location& loc);
   std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);

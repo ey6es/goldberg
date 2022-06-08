@@ -6,8 +6,20 @@
 
 namespace goldberg {
 
-Interpreter::Interpreter () : call_stack_({{std::make_shared<invocation>()}}) {
-  register_builtins();
+std::shared_ptr<Value> Interpreter::t_(new True());
+std::shared_ptr<Value> Interpreter::nil_(new Nil());
+
+std::unordered_map<std::string, std::shared_ptr<std::string>> Interpreter::static_symbol_values_;
+
+std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string& value) {
+  auto& pointer = static_symbol_values_[value];
+  if (!pointer) pointer = std::make_shared<std::string>(value);
+  return pointer;
+}
+
+Interpreter::Interpreter () {
+  static auto builtin_context = create_builtin_context();
+  call_stack_.push_back({std::shared_ptr<invocation>(new invocation{builtin_context})});
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
@@ -28,10 +40,6 @@ std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& f
     if (*result) last_result = result;
   }
   return last_result;
-}
-
-void Interpreter::register_builtin (const std::string& name, const std::shared_ptr<Value>& value) {
-  call_stack_.front().context->lexical_vars[get_symbol_value(name)] = value;
 }
 
 std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc) {
@@ -233,6 +241,9 @@ std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& valu
 }
 
 std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& value) {
+  auto it = static_symbol_values_.find(value);
+  if (it != static_symbol_values_.end()) return it->second;
+
   auto& symbol_value = symbol_values_[value];
   if (!symbol_value.expired()) return std::shared_ptr<std::string>(symbol_value);
   auto new_symbol_value = std::make_shared<std::string>(value);

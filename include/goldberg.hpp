@@ -10,10 +10,7 @@
 
 namespace goldberg {
 
-class Interpreter;
 class Value;
-template<typename T> class NativeOperator;
-template<typename T> class NativeFunction;
 struct invocation;
 struct lexeme;
 struct location;

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <functional>
 #include <unordered_set>
 #include <utility>
@@ -35,6 +36,15 @@ inline std::pair<std::shared_ptr<Value>, std::shared_ptr<Value>> require_2 (cons
   return std::make_pair(first_pair->left(), second_pair->left());
 }
 
+inline std::pair<double, double> require_2_numbers (const std::shared_ptr<Value>& args) {
+  auto first_pair = args->require_pair(args);
+  auto second_pair = first_pair->right()->require_pair(first_pair->right());
+  second_pair->right()->require_nil();
+  return std::make_pair(
+    first_pair->left()->require_number(*first_pair->loc()),
+    second_pair->left()->require_number(*second_pair->loc()));
+}
+
 template<typename T>
 inline std::shared_ptr<Value> fold_numbers (const std::shared_ptr<Value>& args, double initial, const T& combine) {
   double value = initial;
@@ -45,6 +55,12 @@ inline std::shared_ptr<Value> fold_numbers (const std::shared_ptr<Value>& args, 
     next = next_pair->right();
   }
   return std::shared_ptr<Value>(new Number(value));
+}
+
+template<typename T>
+inline std::shared_ptr<Value> reduce_numbers (const std::shared_ptr<Value>& args, const T& combine) {
+  auto first_pair = args->require_pair(args);
+  return fold_numbers(first_pair->right(), first_pair->left()->require_number(*first_pair->loc()), combine);
 }
 
 template<typename T>
@@ -60,6 +76,15 @@ inline std::shared_ptr<Value> compare_numbers (const std::shared_ptr<Value>& arg
     next = next_pair->right();
   }
   return Interpreter::t();
+}
+
+std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list, int count) {
+  if (!*list) return std::make_pair(Interpreter::nil(), 0);
+  auto first_pair = list->require_pair(list);
+  auto result = last(first_pair->right(), count);
+  return result.second < count
+    ? std::make_pair(std::shared_ptr<Value>(new Pair(first_pair->left(), result.first)), result.second + 1)
+    : result;
 }
 
 }
@@ -111,6 +136,11 @@ std::shared_ptr<invocation> Interpreter::create_builtin_context () {
     return nil_;
   });
 
+  add_native_function(ctx, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->evaluate(interpreter, arg);
+  });
+
   add_native_function(ctx, "+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return fold_numbers(args, 0.0, std::plus<double>());
   });
@@ -135,6 +165,16 @@ std::shared_ptr<invocation> Interpreter::create_builtin_context () {
     return *rest
       ? fold_numbers(rest, initial, std::divides<double>())
       : std::shared_ptr<Value>(new Number(1.0 / initial));
+  });
+
+  add_native_function(ctx, "mod", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = require_2_numbers(args);
+    return std::shared_ptr<Value>(new Number(pair.first - std::floor(pair.first / pair.second) * pair.second));
+  });
+
+  add_native_function(ctx, "rem", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = require_2_numbers(args);
+    return std::shared_ptr<Value>(new Number(std::fmod(pair.first, pair.second)));
   });
 
   auto not_fn = [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -169,6 +209,14 @@ std::shared_ptr<invocation> Interpreter::create_builtin_context () {
       next = next_pair->right();
     }
     return Interpreter::t();
+  });
+
+  add_native_function(ctx, "min", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmin));
+  });
+
+  add_native_function(ctx, "max", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmax));
   });
 
   add_native_function(ctx, "cons", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -212,6 +260,17 @@ std::shared_ptr<invocation> Interpreter::create_builtin_context () {
       next = next_pair->right();
     }
     return first;
+  });
+
+  add_native_function(ctx, "last", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto first_pair = args->require_pair(args);
+    int count = 1;
+    if (*first_pair->right()) {
+      auto second_pair = first_pair->right()->require_pair(first_pair->right());
+      second_pair->right()->require_nil();
+      count = static_cast<int>(second_pair->left()->require_number(*second_pair->loc()));
+    }
+    return last(first_pair->left(), count).first;
   });
 
   add_native_function(ctx, "reverse", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {

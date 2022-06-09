@@ -46,6 +46,9 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(or nil nil 2)")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(or nil 3 2)")->to_string() == "3");
 
+  REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
+  
   REQUIRE(interpreter.evaluate("(+)")->to_string() == "0");
   REQUIRE(interpreter.evaluate("(+ 1.0)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(+ (+ 0.5 0.5) 1.5)")->to_string() == "2.5");
@@ -61,6 +64,14 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(/ 2.0)")->to_string() == "0.5");
   REQUIRE(interpreter.evaluate("(/ (+ 1.5 1.5) 2)")->to_string() == "1.5");
   REQUIRE(interpreter.evaluate("(/ 1 2 2)")->to_string() == "0.25");
+
+  REQUIRE(interpreter.evaluate("(rem 13 4)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(rem -1 5)")->to_string() == "-1");
+  REQUIRE(interpreter.evaluate("(rem -13.4 1)")->to_string() == "-0.4");
+
+  REQUIRE(interpreter.evaluate("(mod 13 4)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(mod -1 5)")->to_string() == "4");
+  REQUIRE(interpreter.evaluate("(mod -13.4 1)")->to_string() == "0.6");
 
   REQUIRE(interpreter.evaluate("(not nil)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(not (null nil))")->to_string() == "nil");
@@ -95,6 +106,12 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(/= 0 1 0)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(/= 0 1 2)")->to_string() == "t");
 
+  REQUIRE(interpreter.evaluate("(min 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(min 2 1 3)")->to_string() == "1");
+
+  REQUIRE(interpreter.evaluate("(max 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(max 2 1 3)")->to_string() == "3");
+
   REQUIRE(interpreter.evaluate("(cons 0 nil)")->to_string() == "(0)");
   REQUIRE(interpreter.evaluate("(cons 0 1)")->to_string() == "(0 . 1)");
   REQUIRE(interpreter.evaluate("(cons 0 '(1 2 3))")->to_string() == "(0 1 2 3)");
@@ -111,6 +128,10 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(append)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append nil nil nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append '(1) nil '(2 3))")->to_string() == "(1 2 3)");
+
+  REQUIRE(interpreter.evaluate("(last nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(last '(1 2 3))")->to_string() == "(3)");
+  REQUIRE(interpreter.evaluate("(last '(1 2 3) 2)")->to_string() == "(2 3)");
 
   REQUIRE(interpreter.evaluate("(reverse nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");

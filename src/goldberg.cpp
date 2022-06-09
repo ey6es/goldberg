@@ -19,7 +19,11 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 
 Interpreter::Interpreter () {
   static auto builtin_context = create_builtin_context();
-  call_stack_.push_back({std::shared_ptr<invocation>(new invocation{builtin_context})});
+  call_stack_.push_back({std::shared_ptr<Invocation>(new Invocation{builtin_context})});
+}
+
+const std::shared_ptr<Invocation>& Interpreter::current_context () const {
+  return call_stack_.back().context;
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
@@ -263,6 +267,10 @@ std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& 
   return std::shared_ptr<Value>();
 }
 
+void Interpreter::push_frame (const std::shared_ptr<Invocation>& parent_context) {
+  call_stack_.push_back({std::shared_ptr<Invocation>(new Invocation{parent_context})});
+}
+
 void Value::require_nil () const {
   if (!is_nil()) throw script_error("Unexpected argument", *loc());
 }
@@ -279,9 +287,8 @@ std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std
   return evaluate(interpreter, self);
 }
 
-std::shared_ptr<Value> Value::invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Value>& source) const {
-  throw script_error("Cannot invoke value " + source->to_string(), *source->loc());
+std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
+  throw script_error("Expected function", loc);
 }
 
 std::string Number::to_string () const {
@@ -322,7 +329,7 @@ std::shared_ptr<Pair> Pair::require_pair (const std::shared_ptr<Value>& self) co
 
 std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   auto fn = left_->evaluate(interpreter, left_);
-  return fn->invoke(interpreter, right_, left_);
+  return fn->invoke(interpreter, right_, *loc());
 }
 
 std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -331,10 +338,33 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
   return std::shared_ptr<Value>(new Pair(left, right, loc()));
 }
 
-std::shared_ptr<Value> invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {
-  auto value = lexical_vars.find(symbol_value);
-  if (value != lexical_vars.end()) return value->second;
-  return parent ? parent->lookup(symbol_value) : std::shared_ptr<Value>();
+std::shared_ptr<Value> Lambda::invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
+  interpreter.push_frame(context_);
+
+  auto first_pair = definition_->require_pair(definition_);
+  auto next_param = first_pair->left();
+
+  auto last_result = Interpreter::nil();
+  auto next_statement = first_pair->right();
+  while (*next_statement) {
+    auto next_statement_pair = next_statement->require_pair(next_statement);
+    last_result = next_statement_pair->left()->evaluate(interpreter, next_statement_pair->left());
+    next_statement = next_statement_pair->right();
+  }
+
+  interpreter.pop_frame();
+  return last_result;
+}
+
+void Invocation::define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
+  values_[symbol_value] = value;
+}
+
+std::shared_ptr<Value> Invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {
+  auto value = values_.find(symbol_value);
+  if (value != values_.end()) return value->second;
+  return parent_ ? parent_->lookup(symbol_value) : std::shared_ptr<Value>();
 }
 
 }

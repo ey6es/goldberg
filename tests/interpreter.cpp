@@ -29,7 +29,20 @@ TEST_CASE("expressions can be parsed", "[parse]") {
   REQUIRE(interpreter.evaluate("'(foo 1.25 \"bar\" (baz))")->to_string() == "(foo 1.25 \"bar\" (baz))");
 }
 
-TEST_CASE("expressions can be evaluated", "[evaluate]") {
+TEST_CASE("basic expressions can be evaluated", "[basic]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(equal 1 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(equal 1 2)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(equal 1 \"1\")")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(equal '(1 2) '(1 2 3))")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(equal '(1 2 (3)) '(1 2 (3)))")->to_string() == "t");
+}
+
+TEST_CASE("conditional expressions can be evaluated", "[conditional]") {
   goldberg::Interpreter interpreter;
 
   REQUIRE(interpreter.evaluate("(if t 1)")->to_string() == "1");
@@ -46,9 +59,13 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(or nil nil 2)")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(or nil 3 2)")->to_string() == "3");
 
-  REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
-  REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
-  
+  REQUIRE(interpreter.evaluate("(not nil)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(not (null nil))")->to_string() == "nil");
+}
+
+TEST_CASE("numeric expressions can be evaluated", "[numeric]") {
+  goldberg::Interpreter interpreter;
+
   REQUIRE(interpreter.evaluate("(+)")->to_string() == "0");
   REQUIRE(interpreter.evaluate("(+ 1.0)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(+ (+ 0.5 0.5) 1.5)")->to_string() == "2.5");
@@ -72,9 +89,6 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(mod 13 4)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(mod -1 5)")->to_string() == "4");
   REQUIRE(interpreter.evaluate("(mod -13.4 1)")->to_string() == "0.6");
-
-  REQUIRE(interpreter.evaluate("(not nil)")->to_string() == "t");
-  REQUIRE(interpreter.evaluate("(not (null nil))")->to_string() == "nil");
 
   REQUIRE(interpreter.evaluate("(= 0)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(= 0 0)")->to_string() == "t");
@@ -111,6 +125,10 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
 
   REQUIRE(interpreter.evaluate("(max 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(max 2 1 3)")->to_string() == "3");
+}
+
+TEST_CASE("list expressions can be evaluated", "[list]") {
+  goldberg::Interpreter interpreter;
 
   REQUIRE(interpreter.evaluate("(cons 0 nil)")->to_string() == "(0)");
   REQUIRE(interpreter.evaluate("(cons 0 1)")->to_string() == "(0 . 1)");
@@ -135,4 +153,11 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
 
   REQUIRE(interpreter.evaluate("(reverse nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");
+}
+
+TEST_CASE("lambda expressions can be evaluated", "[lambda]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("((lambda ()))")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("((lambda () 1 2 3))")->to_string() == "3");
 }

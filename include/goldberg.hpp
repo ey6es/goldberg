@@ -178,6 +178,9 @@ public:
   const std::shared_ptr<Value>& left () const { return left_; }
   const std::shared_ptr<Value>& right () const { return right_; }
 
+  void set_left (const std::shared_ptr<Value>& left) { left_ = left; }
+  void set_right (const std::shared_ptr<Value>& right) { right_ = right; }
+
   std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const override;
 
   std::string to_string () const override { return '(' + left_->to_string() + right_->to_rest_string() + ')'; }

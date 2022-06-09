@@ -94,4 +94,24 @@ TEST_CASE("expressions can be evaluated", "[evaluate]") {
   REQUIRE(interpreter.evaluate("(/= 0 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(/= 0 1 0)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(/= 0 1 2)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(cons 0 nil)")->to_string() == "(0)");
+  REQUIRE(interpreter.evaluate("(cons 0 1)")->to_string() == "(0 . 1)");
+  REQUIRE(interpreter.evaluate("(cons 0 '(1 2 3))")->to_string() == "(0 1 2 3)");
+
+  REQUIRE(interpreter.evaluate("(list)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(list 1 (+ 1 1) 3)")->to_string() == "(1 2 3)");
+
+  REQUIRE(interpreter.evaluate("(car '(1 2 3))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(first '(2 . 3)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(cdr '(1 2 3))")->to_string() == "(2 3)");
+  REQUIRE(interpreter.evaluate("(rest '(2 . 3)")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(append)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(append nil nil nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(append '(1) nil '(2 3))")->to_string() == "(1 2 3)");
+
+  REQUIRE(interpreter.evaluate("(reverse nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");
 }

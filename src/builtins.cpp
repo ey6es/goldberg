@@ -1,5 +1,6 @@
 #include <functional>
 #include <unordered_set>
+#include <utility>
 
 #include "goldberg.hpp"
 
@@ -25,6 +26,13 @@ inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
   auto pair = args->require_pair(args);
   pair->right()->require_nil();
   return pair->left();
+}
+
+inline std::pair<std::shared_ptr<Value>, std::shared_ptr<Value>> require_2 (const std::shared_ptr<Value>& args) {
+  auto first_pair = args->require_pair(args);
+  auto second_pair = first_pair->right()->require_pair(first_pair->right());
+  second_pair->right()->require_nil();
+  return std::make_pair(first_pair->left(), second_pair->left());
 }
 
 template<typename T>
@@ -161,6 +169,60 @@ std::shared_ptr<invocation> Interpreter::create_builtin_context () {
       next = next_pair->right();
     }
     return Interpreter::t();
+  });
+
+  add_native_function(ctx, "cons", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = require_2(args);
+    return std::shared_ptr<Value>(new Pair(pair.first, pair.second));
+  });
+
+  add_native_function(ctx, "list", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return args;
+  });
+
+  auto car = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->require_pair(arg)->left();
+  };
+  add_native_function(ctx, "car", car);
+  add_native_function(ctx, "first", car);
+
+  auto cdr = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->require_pair(arg)->right();
+  };
+  add_native_function(ctx, "cdr", cdr);
+  add_native_function(ctx, "rest", cdr);
+
+  add_native_function(ctx, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto first = nil_;
+    std::shared_ptr<Pair> last;
+    auto next = args;
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      auto list_next = next_pair->left();
+      while (*list_next) {
+        auto list_next_pair = list_next->require_pair(list_next);
+        auto new_last = std::make_shared<Pair>(list_next_pair->left(), nil_);
+        if (last) last->set_right(new_last);
+        else first = new_last;
+        last = new_last;
+        list_next = list_next_pair->right();
+      }
+      next = next_pair->right();
+    }
+    return first;
+  });
+
+  add_native_function(ctx, "reverse", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto first = nil_;
+    auto next = require_1(args);
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      first = std::shared_ptr<Value>(new Pair(next_pair->left(), first));
+      next = next_pair->right();
+    }
+    return first;
   });
 
   return ctx;

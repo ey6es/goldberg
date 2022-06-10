@@ -57,7 +57,7 @@ private:
 
   std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
 
-  void push_frame (const std::shared_ptr<Invocation>& parent_context);
+  void push_frame (const std::shared_ptr<Invocation>& context);
   void pop_frame () { call_stack_.pop_back(); }
 
   std::unordered_map<std::string, std::weak_ptr<std::string>> symbol_values_;
@@ -80,9 +80,12 @@ public:
 
   virtual bool is_nil () const { return false; }
 
+  virtual std::shared_ptr<Pair> as_pair (const std::shared_ptr<Value>& self) const { return nullptr; }
+
   void require_nil () const;
   virtual double require_number (const location& loc) const;
-  virtual std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
+  virtual std::shared_ptr<std::string> require_symbol (const location& loc) const;
+  std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
 
   virtual bool equals (const std::shared_ptr<Value>& other) const { return this == other.get(); }
   virtual bool equals_true () const { return false; }
@@ -167,6 +170,8 @@ public:
   explicit Symbol (const std::shared_ptr<std::string>& value, const std::shared_ptr<location>& loc = nullptr)
     : Value(loc), value_(value) {}
 
+  std::shared_ptr<std::string> require_symbol (const location& loc) const override { return value_; }
+
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_symbol(value_); }
   bool equals_symbol (const std::shared_ptr<std::string>& value) const override { return value == value_; }
 
@@ -191,7 +196,7 @@ public:
   void set_left (const std::shared_ptr<Value>& left) { left_ = left; }
   void set_right (const std::shared_ptr<Value>& right) { right_ = right; }
 
-  std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const override;
+  std::shared_ptr<Pair> as_pair (const std::shared_ptr<Value>& self) const { return std::static_pointer_cast<Pair>(self); }
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_pair(left_, right_); }
   bool equals_pair (const std::shared_ptr<Value>& left, const std::shared_ptr<Value>& right) const override {

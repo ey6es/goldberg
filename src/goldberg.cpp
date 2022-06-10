@@ -19,7 +19,7 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 
 Interpreter::Interpreter () {
   static auto builtin_context = create_builtin_context();
-  call_stack_.push_back({std::shared_ptr<Invocation>(new Invocation{builtin_context})});
+  push_frame(std::make_shared<Invocation>(builtin_context));
 }
 
 const std::shared_ptr<Invocation>& Interpreter::current_context () const {
@@ -267,8 +267,8 @@ std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& 
   return std::shared_ptr<Value>();
 }
 
-void Interpreter::push_frame (const std::shared_ptr<Invocation>& parent_context) {
-  call_stack_.push_back({std::shared_ptr<Invocation>(new Invocation{parent_context})});
+void Interpreter::push_frame (const std::shared_ptr<Invocation>& context) {
+  call_stack_.push_back({context});
 }
 
 void Value::require_nil () const {
@@ -279,8 +279,14 @@ double Value::require_number (const location& loc) const {
   throw script_error("Expected number", loc);
 }
 
+std::shared_ptr<std::string> Value::require_symbol (const location& loc) const {
+  throw script_error("Expected symbol", loc);
+}
+
 std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) const {
-  throw script_error("Expected argument", *loc());
+  auto result = as_pair(self);
+  if (!result) throw script_error("Expected argument", *loc());
+  return result;
 }
 
 std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -323,10 +329,6 @@ std::shared_ptr<Value> Symbol::evaluate (Interpreter& interpreter, const std::sh
   throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
 }
 
-std::shared_ptr<Pair> Pair::require_pair (const std::shared_ptr<Value>& self) const {
-  return std::static_pointer_cast<Pair>(self);
-}
-
 std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   auto fn = left_->evaluate(interpreter, left_);
   return fn->invoke(interpreter, right_, *loc());
@@ -338,12 +340,120 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
   return std::shared_ptr<Value>(new Pair(left, right, loc()));
 }
 
+static auto aux_keyword = Interpreter::static_symbol_value("&aux");
+static auto key_keyword = Interpreter::static_symbol_value("&key");
+static auto rest_keyword = Interpreter::static_symbol_value("&rest");
+static auto optional_keyword = Interpreter::static_symbol_value("&optional");
+
 std::shared_ptr<Value> Lambda::invoke (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  interpreter.push_frame(context_);
-
   auto first_pair = definition_->require_pair(definition_);
   auto next_param = first_pair->left();
+  auto next_arg = args->evaluate_rest(interpreter, args);
+  auto ctx = std::make_shared<Invocation>(context_);
+
+  auto is_keyword = [](const auto& symbol_value) {
+    return symbol_value->length() > 0 && symbol_value->front() == '&';
+  };
+
+  auto process_aux = [&](const auto& keyword_value, const auto& keyword_loc) {
+    if (keyword_value != aux_keyword) {
+      throw script_error("Unknown keyword \"" + *keyword_value + '"', keyword_loc);
+    }
+
+  };
+
+  auto process_key = [&](const auto& keyword_value, const auto& keyword_loc) {
+    if (keyword_value != key_keyword) {
+      process_aux(keyword_value, keyword_loc);
+      return;
+    }
+
+  };
+
+  auto process_rest = [&](const auto& keyword_value, const auto& keyword_loc) {
+    if (keyword_value != rest_keyword) {
+      process_key(keyword_value, keyword_loc);
+      return;
+    }
+    auto next_param_pair = next_param->require_pair(next_param);
+    auto symbol_value = next_param_pair->left()->require_symbol(*next_param_pair->loc());
+    next_param = next_param_pair->right();
+    ctx->define(symbol_value, next_arg);
+    if (*next_param) {
+      next_param_pair = next_param->require_pair(next_param);
+      auto loc = next_param_pair->loc();
+      symbol_value = next_param_pair->left()->require_symbol(*loc);
+      next_param = next_param_pair->right();
+      if (!is_keyword(symbol_value)) throw script_error("Unexpected argument \"" + *symbol_value + '"', *loc);
+      process_key(symbol_value, *loc);
+    }
+    while (*next_arg) {
+      auto next_arg_pair = next_arg->require_pair(next_arg);
+      next_arg = next_arg_pair->right();
+    }
+  };
+
+  auto process_optional = [&](const auto& keyword_value, const auto& keyword_loc) {
+    if (keyword_value != optional_keyword) {
+      process_rest(keyword_value, keyword_loc);
+      return;
+    }
+    while (*next_param) {
+      auto next_param_pair = next_param->require_pair(next_param);
+      auto binding_pair = next_param_pair->left()->as_pair(next_param_pair->left());
+      next_param = next_param_pair->right();
+      std::shared_ptr<std::string> symbol_value;
+      std::shared_ptr<Value> initform = Interpreter::nil();
+      std::shared_ptr<std::string> svar;
+      if (binding_pair) {
+        symbol_value = binding_pair->left()->require_symbol(*binding_pair->loc());
+        if (*binding_pair->right()) {
+          auto initform_pair = binding_pair->right()->require_pair(binding_pair->right());
+          initform = initform_pair->left();
+          if (*initform_pair->right()) {
+            auto svar_pair = initform_pair->right()->require_pair(initform_pair->right());
+            svar = svar_pair->left()->require_symbol(*svar_pair->loc());
+            svar_pair->right()->require_nil();
+          }
+        }
+      } else {
+        auto loc = next_param_pair->loc();
+        symbol_value = next_param_pair->left()->require_symbol(*loc);
+        if (is_keyword(symbol_value)) {
+          process_rest(symbol_value, *loc);
+          break;
+        }
+      }
+      if (*next_arg) {
+        auto next_arg_pair = next_arg->require_pair(next_arg);
+        ctx->define(symbol_value, next_arg_pair->left());
+        if (svar) ctx->define(svar, Interpreter::t());
+        next_arg = next_arg_pair->right();
+
+      } else {
+        ctx->define(symbol_value, initform->evaluate(interpreter, initform));
+        if (svar) ctx->define(svar, Interpreter::nil());
+      }
+    }
+  };
+
+  while (*next_param) {
+    auto next_param_pair = next_param->require_pair(next_param);
+    auto loc = next_param_pair->loc();
+    auto symbol_value = next_param_pair->left()->require_symbol(*loc);
+    next_param = next_param_pair->right();
+    if (is_keyword(symbol_value)) {
+      process_optional(symbol_value, *loc);
+      break;
+    }
+    auto next_arg_pair = next_arg->require_pair(next_arg);
+    ctx->define(symbol_value, next_arg_pair->left());
+    next_arg = next_arg_pair->right();
+  }
+  next_arg->require_nil();
+
+  interpreter.push_frame(ctx);
 
   auto last_result = Interpreter::nil();
   auto next_statement = first_pair->right();
@@ -352,8 +462,8 @@ std::shared_ptr<Value> Lambda::invoke (
     last_result = next_statement_pair->left()->evaluate(interpreter, next_statement_pair->left());
     next_statement = next_statement_pair->right();
   }
-
   interpreter.pop_frame();
+
   return last_result;
 }
 

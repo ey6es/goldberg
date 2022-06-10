@@ -160,4 +160,14 @@ TEST_CASE("lambda expressions can be evaluated", "[lambda]") {
 
   REQUIRE(interpreter.evaluate("((lambda ()))")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("((lambda () 1 2 3))")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("((lambda (a) (+ a 1)) (* 3 3))")->to_string() == "10");
+
+  REQUIRE(interpreter.evaluate("((lambda (&optional b) b))")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("((lambda (&optional b) b) 5)")->to_string() == "5");
+  REQUIRE(interpreter.evaluate("((lambda (&optional (b 5)) b))")->to_string() == "5");
+  REQUIRE(interpreter.evaluate("((lambda (&optional (b 5 b_set)) b_set))")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("((lambda (&optional (b 5 b_set)) b_set) 5)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("((lambda (&optional b &rest rest) rest))")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("((lambda (&optional b &rest rest) rest) 3 2 1)")->to_string() == "(2 1)");
 }

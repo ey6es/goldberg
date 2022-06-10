@@ -37,6 +37,7 @@ private:
 
   friend class Symbol;
   friend class Lambda;
+  friend struct parameters;
 
   static std::shared_ptr<Value> t_;
   static std::shared_ptr<Value> nil_;
@@ -80,11 +81,12 @@ public:
 
   virtual bool is_nil () const { return false; }
 
+  virtual std::shared_ptr<std::string> as_symbol () const { return nullptr; }
   virtual std::shared_ptr<Pair> as_pair (const std::shared_ptr<Value>& self) const { return nullptr; }
 
   void require_nil () const;
   virtual double require_number (const location& loc) const;
-  virtual std::shared_ptr<std::string> require_symbol (const location& loc) const;
+  std::shared_ptr<std::string> require_symbol (const location& loc) const;
   std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
 
   virtual bool equals (const std::shared_ptr<Value>& other) const { return this == other.get(); }
@@ -170,7 +172,7 @@ public:
   explicit Symbol (const std::shared_ptr<std::string>& value, const std::shared_ptr<location>& loc = nullptr)
     : Value(loc), value_(value) {}
 
-  std::shared_ptr<std::string> require_symbol (const location& loc) const override { return value_; }
+  std::shared_ptr<std::string> as_symbol () const override { return value_; }
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_symbol(value_); }
   bool equals_symbol (const std::shared_ptr<std::string>& value) const override { return value == value_; }
@@ -259,25 +261,60 @@ private:
   T function_;
 };
 
-class Lambda : public NamedValue {
+class parameters {
 public:
 
-  Lambda (const std::string& name, const std::shared_ptr<Invocation>& context, const std::shared_ptr<Value>& definition)
-    : NamedValue(name), context_(context), definition_(definition) {}
+  parameters (Interpreter& interpreter, const std::shared_ptr<Value>& spec);
 
-  std::shared_ptr<Value> invoke (
-      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
+  void bind (Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const;
 
 private:
 
-  std::shared_ptr<Invocation> context_;
-  std::shared_ptr<Value> definition_;
+  struct optional {
+    std::shared_ptr<std::string> var;
+    std::shared_ptr<Value> initform;
+    std::shared_ptr<std::string> svar;
+  };
+
+  struct aux {
+    std::shared_ptr<std::string> var;
+    std::shared_ptr<Value> initform;
+  };
+
+  std::vector<std::shared_ptr<std::string>> required_;
+  std::vector<optional> optional_;
+  std::shared_ptr<std::string> rest_;
+  std::unordered_map<std::shared_ptr<std::string>, optional> key_;
+  bool allow_other_keys_;
+  std::vector<aux> aux_;
+};
+
+class Lambda : public NamedValue {
+public:
+
+  Lambda (
+    const std::string& name,
+    const std::shared_ptr<Invocation>& parent_context,
+    parameters&& parameters,
+    const std::shared_ptr<Value>& body)
+      : NamedValue(name), parent_context_(parent_context), parameters_(parameters), body_(body) {}
+
+  std::shared_ptr<Value> invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
+
+private:
+
+  std::shared_ptr<Invocation> parent_context_;
+  parameters parameters_;
+  std::shared_ptr<Value> body_;
 };
 
 class Invocation {
 public:
 
   Invocation (const std::shared_ptr<Invocation>& parent = nullptr) : parent_(parent) {}
+
+  bool is_defined (const std::shared_ptr<std::string>& symbol_value) const { return values_.count(symbol_value) > 0; }
 
   void define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 

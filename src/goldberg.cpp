@@ -345,11 +345,10 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
 
 static auto aux_keyword = Interpreter::static_symbol_value("&aux");
 static auto key_keyword = Interpreter::static_symbol_value("&key");
-static auto allow_other_keys_keyword = Interpreter::static_symbol_value("&allow-other-keys");
 static auto rest_keyword = Interpreter::static_symbol_value("&rest");
 static auto optional_keyword = Interpreter::static_symbol_value("&optional");
 
-parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& spec) : allow_other_keys_(false) {
+parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& spec) {
   auto next_param = spec;
 
   auto is_keyword = [](const auto& symbol_value) {
@@ -419,13 +418,6 @@ parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& 
         symbol_value = next_param_pair->left()->require_symbol(*loc);
         keyword_symbol = interpreter.get_symbol_value(':' + *symbol_value);
         if (is_keyword(symbol_value)) {
-          if (symbol_value == allow_other_keys_keyword) {
-            allow_other_keys_ = true;
-            if (!*next_param) break;
-            next_param_pair = next_param->require_pair(next_param);
-            loc = next_param_pair->loc();
-            symbol_value = next_param_pair->left()->require_symbol(*loc);
-          }
           process_aux(symbol_value, *loc);
           break;
         }
@@ -536,12 +528,6 @@ void parameters::bind (
           next_arg_pair = next_arg->require_pair(next_arg);
           ctx->define(it->second.var, next_arg_pair->left());
           if (it->second.svar) ctx->define(it->second.svar, Interpreter::t());
-          next_arg = next_arg_pair->right();
-          continue;
-
-        } else if (allow_other_keys_) {
-          next_arg_pair = next_arg->require_pair(next_arg);
-          ctx->define(symbol_value, next_arg_pair->left());
           next_arg = next_arg_pair->right();
           continue;
         }

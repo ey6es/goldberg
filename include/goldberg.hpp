@@ -285,7 +285,6 @@ private:
   std::vector<optional> optional_;
   std::shared_ptr<std::string> rest_;
   std::unordered_map<std::shared_ptr<std::string>, optional> key_;
-  bool allow_other_keys_;
   std::vector<aux> aux_;
 };
 

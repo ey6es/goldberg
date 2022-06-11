@@ -29,6 +29,10 @@ inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
   return pair->left();
 }
 
+inline double require_1_number (const std::shared_ptr<Value>& args) {
+  return require_1(args)->require_number(*args->loc());
+}
+
 inline std::pair<std::shared_ptr<Value>, std::shared_ptr<Value>> require_2 (const std::shared_ptr<Value>& args) {
   auto first_pair = args->require_pair(args);
   auto second_pair = first_pair->right()->require_pair(first_pair->right());
@@ -94,6 +98,7 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
 
   define(ctx, "nil", nil_);
   define(ctx, "t", t_);
+  define(ctx, "pi", std::make_shared<Number>(M_PI));
 
   define_native_operator(ctx, "quote", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return require_1(args);
@@ -154,7 +159,6 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
     auto pair = require_2(args);
     return pair.first == pair.second ? t_ : nil_;
   });
-
   define_native_function(ctx, "equal", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2(args);
     return pair.first->equals(pair.second) ? t_ : nil_;
@@ -190,10 +194,80 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
     auto pair = require_2_numbers(args);
     return std::make_shared<Number>(pair.first - std::floor(pair.first / pair.second) * pair.second);
   });
-
   define_native_function(ctx, "rem", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2_numbers(args);
     return std::make_shared<Number>(std::fmod(pair.first, pair.second));
+  });
+
+  define_native_function(ctx, "sin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::sin(require_1_number(args)));
+  });
+  define_native_function(ctx, "asin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::asin(require_1_number(args)));
+  });
+  define_native_function(ctx, "cos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::cos(require_1_number(args)));
+  });
+  define_native_function(ctx, "acos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::acos(require_1_number(args)));
+  });
+  define_native_function(ctx, "tan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::tan(require_1_number(args)));
+  });
+  define_native_function(ctx, "atan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto first_pair = args->require_pair(args);
+    auto second_pair = first_pair->right()->as_pair(first_pair->right());
+    if (second_pair) {
+      second_pair->right()->require_nil();
+      return std::make_shared<Number>(std::atan2(
+        first_pair->left()->require_number(*first_pair->loc()),
+        second_pair->left()->require_number(*second_pair->loc())));
+
+    } else {
+      first_pair->right()->require_nil();
+      return std::make_shared<Number>(std::tan(first_pair->left()->require_number(*first_pair->loc())));
+    }
+  });
+
+  define_native_function(ctx, "floor", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::floor(require_1_number(args)));
+  });
+  define_native_function(ctx, "ceiling", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::ceil(require_1_number(args)));
+  });
+  define_native_function(ctx, "truncate", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::trunc(require_1_number(args)));
+  });
+  define_native_function(ctx, "round", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::round(require_1_number(args)));
+  });
+
+  define_native_function(ctx, "abs", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::abs(require_1_number(args)));
+  });
+  define_native_function(ctx, "sqrt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::sqrt(require_1_number(args)));
+  });
+  define_native_function(ctx, "exp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(std::exp(require_1_number(args)));
+  });
+  define_native_function(ctx, "expt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = require_2_numbers(args);
+    return std::make_shared<Number>(std::pow(pair.first, pair.second));
+  });
+  define_native_function(ctx, "log", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto first_pair = args->require_pair(args);
+    auto second_pair = first_pair->right()->as_pair(first_pair->right());
+    if (second_pair) {
+      second_pair->right()->require_nil();
+      return std::make_shared<Number>(
+        std::log(first_pair->left()->require_number(*first_pair->loc())) /
+        std::log(second_pair->left()->require_number(*second_pair->loc())));
+
+    } else {
+      first_pair->right()->require_nil();
+      return std::make_shared<Number>(std::log(first_pair->left()->require_number(*first_pair->loc())));
+    }
   });
 
   auto not_fn = [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {

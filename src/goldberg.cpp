@@ -50,6 +50,8 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc) {
   return parse(in, loc, lex(in, loc));
 }
 
+static auto quote_symbol = Interpreter::static_symbol_value("quote");
+
 std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, const lexeme& token) {
   switch (token.character) {
     case '.':
@@ -64,7 +66,7 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
     case '\'': {
       auto token_loc = std::make_shared<location>(token.loc);
       return std::make_shared<Pair>(
-        std::make_shared<Symbol>(get_symbol_value("quote"), token_loc),
+        std::make_shared<Symbol>(quote_symbol, token_loc),
         std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
         token_loc);
     }
@@ -81,6 +83,10 @@ std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc)
 
     case '.':
       return parse(in, loc);
+
+    case 0:
+      if (!*token.value) throw script_error("Unmatched '('", token.loc);
+      // fall through
 
     default: {
       auto first = parse(in, loc, token);

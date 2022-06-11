@@ -90,6 +90,28 @@ TEST_CASE("numeric expressions can be evaluated", "[numeric]") {
   REQUIRE(interpreter.evaluate("(mod -1 5)")->to_string() == "4");
   REQUIRE(interpreter.evaluate("(mod -13.4 1)")->to_string() == "0.6");
 
+  REQUIRE(interpreter.evaluate("(sin 0)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(sin (/ pi 2))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(asin 0)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(cos 0)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(cos pi)")->to_string() == "-1");
+  REQUIRE(interpreter.evaluate("(acos 1)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(tan 0)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(atan 0)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(atan 0 0)")->to_string() == "0");
+
+  REQUIRE(interpreter.evaluate("(floor 0.75)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(ceiling 0.75)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(truncate -0.75)")->to_string() == "-0");
+  REQUIRE(interpreter.evaluate("(round 0.75)")->to_string() == "1");
+
+  REQUIRE(interpreter.evaluate("(abs -5)")->to_string() == "5");
+  REQUIRE(interpreter.evaluate("(sqrt 9)")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("(exp 0)")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(expt 3 2)")->to_string() == "9");
+  REQUIRE(interpreter.evaluate("(log (exp 1))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(log 1024 2)")->to_string() == "10");
+
   REQUIRE(interpreter.evaluate("(= 0)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(= 0 0)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(= 0 1)")->to_string() == "nil");

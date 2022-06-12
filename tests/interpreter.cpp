@@ -32,6 +32,9 @@ TEST_CASE("expressions can be parsed", "[parse]") {
 TEST_CASE("basic expressions can be evaluated", "[basic]") {
   goldberg::Interpreter interpreter;
 
+  REQUIRE(interpreter.evaluate("`(1 2 (+ 1 2))")->to_string() == "(1 2 (+ 1 2))");
+  REQUIRE(interpreter.evaluate("`(1 2 ,(+ 1 2))")->to_string() == "(1 2 3)");
+
   REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
 

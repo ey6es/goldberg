@@ -31,6 +31,12 @@ std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const s
   return load(in, filename);
 }
 
+std::shared_ptr<Value> Interpreter::require (const std::string& filename) {
+  auto& value = required_files_[filename];
+  if (!value) value = load(filename);
+  return value;
+}
+
 std::shared_ptr<Value> Interpreter::load (const std::string& filename) {
   std::ifstream in(filename);
   return load(in, filename);
@@ -40,25 +46,38 @@ std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& f
   location loc{std::make_shared<std::string>(filename), 1, 1};
   std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
   while (in) {
-    auto result = evaluate(parse(in, loc));
+    auto result = evaluate(parse(in, loc, this));
     if (*result) last_result = result;
   }
   return last_result;
 }
 
-std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc) {
-  return parse(in, loc, lex(in, loc));
+std::shared_ptr<Value> Interpreter::parse (const std::string& string) {
+  std::istringstream in(string);
+  location loc{std::make_shared<std::string>("<string>"), 1, 1};
+  std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
+  while (in) {
+    auto result = parse(in, loc);
+    if (*result) last_result = result;
+  }
+  return last_result;
+}
+
+std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, Interpreter* interpreter) {
+  return parse(in, loc, lex(in, loc, interpreter), interpreter);
 }
 
 static auto quote_symbol = Interpreter::static_symbol_value("quote");
+static auto backquote_symbol = Interpreter::static_symbol_value("backquote");
+static auto comma_symbol = Interpreter::static_symbol_value("comma");
 
-std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, const lexeme& token) {
+std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, const lexeme& token, Interpreter* interpreter) {
   switch (token.character) {
     case '.':
       throw script_error("Unexpected '.'", token.loc);
 
     case '(':
-      return parse_rest(in, loc);
+      return parse_rest(in, loc, interpreter);
 
     case ')':
       throw script_error("Mismatched ')'", token.loc);
@@ -67,7 +86,21 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
       auto token_loc = std::make_shared<location>(token.loc);
       return std::make_shared<Pair>(
         std::make_shared<Symbol>(quote_symbol, token_loc),
-        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
+        std::make_shared<Pair>(parse(in, loc, interpreter), std::make_shared<Nil>(token_loc), token_loc),
+        token_loc);
+    }
+    case '`': {
+      auto token_loc = std::make_shared<location>(token.loc);
+      return std::make_shared<Pair>(
+        std::make_shared<Symbol>(backquote_symbol, token_loc),
+        std::make_shared<Pair>(parse(in, loc, interpreter), std::make_shared<Nil>(token_loc), token_loc),
+        token_loc);
+    }
+    case ',': {
+      auto token_loc = std::make_shared<location>(token.loc);
+      return std::make_shared<Pair>(
+        std::make_shared<Symbol>(comma_symbol, token_loc),
+        std::make_shared<Pair>(parse(in, loc, interpreter), std::make_shared<Nil>(token_loc), token_loc),
         token_loc);
     }
     default:
@@ -75,27 +108,27 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
   }
 }
 
-std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc) {
-  auto token = lex(in, loc);
+std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc, Interpreter* interpreter) {
+  auto token = lex(in, loc, interpreter);
   switch (token.character) {
     case ')':
       return std::make_shared<Nil>(std::make_shared<location>(token.loc));
 
     case '.':
-      return parse(in, loc);
+      return parse(in, loc, interpreter);
 
     case 0:
       if (!*token.value) throw script_error("Unmatched '('", token.loc);
       // fall through
 
     default: {
-      auto first = parse(in, loc, token);
-      return std::make_shared<Pair>(first, parse_rest(in, loc), first->loc());
+      auto first = parse(in, loc, token, interpreter);
+      return std::make_shared<Pair>(first, parse_rest(in, loc, interpreter), first->loc());
     }
   }
 }
 
-lexeme Interpreter::lex (std::istream& in, location& loc) {
+lexeme Interpreter::lex (std::istream& in, location& loc, Interpreter* interpreter) {
   while (in.good()) {
     int ch = in.get();
     switch (ch) {
@@ -192,7 +225,9 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
       }
       case '(':
       case ')':
-      case '\'': {
+      case '\'':
+      case '`':
+      case ',': {
         lexeme token{static_cast<char>(ch), nullptr, loc};
         loc.column++;
         return token;
@@ -239,26 +274,28 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         char second = value.length() > 1 ? value[1] : 0;
         return first == '.' || std::isdigit(first) || (first == '+' || first == '-') && (second == '.' || std::isdigit(second))
           ? lexeme{0, std::make_shared<Number>(std::stod(value), std::make_shared<location>(start)), start}
-          : lexeme{0, std::make_shared<Symbol>(get_symbol_value(value), std::make_shared<location>(start)), start};
+          : lexeme{0, std::make_shared<Symbol>(get_symbol_value(value, interpreter), std::make_shared<location>(start)), start};
       }
     }
   }
   return {0, std::make_shared<Nil>(std::make_shared<location>(loc)), loc};
 }
 
-std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& value) {
-  return value->evaluate(*this, value);
-}
+std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& value, Interpreter* interpreter) {
+  if (!interpreter) return static_symbol_value(value);
 
-std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& value) {
   auto it = static_symbol_values_.find(value);
   if (it != static_symbol_values_.end()) return it->second;
 
-  auto& symbol_value = symbol_values_[value];
+  auto& symbol_value = interpreter->symbol_values_[value];
   if (!symbol_value.expired()) return std::shared_ptr<std::string>(symbol_value);
   auto new_symbol_value = std::make_shared<std::string>(value);
   symbol_value = new_symbol_value;
   return new_symbol_value;
+}
+
+std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& value) {
+  return value->evaluate(*this, value);
 }
 
 std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& symbol_value) const {
@@ -285,6 +322,10 @@ double Value::require_number (const location& loc) const {
   throw script_error("Expected number", loc);
 }
 
+std::string Value::require_string (const location& loc) const {
+  throw script_error("Expected string", loc);
+}
+
 std::shared_ptr<std::string> Value::require_symbol (const location& loc) const {
   auto result = as_symbol();
   if (result) return result;
@@ -299,6 +340,10 @@ std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) c
 
 std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   return evaluate(interpreter, self);
+}
+
+std::shared_ptr<Value> Value::evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return self;
 }
 
 std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
@@ -349,12 +394,22 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
   return std::make_shared<Pair>(left, right, loc());
 }
 
+std::shared_ptr<Value> Pair::evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  if (left_->as_symbol() == comma_symbol) {
+    auto comma_pair = right_->require_pair(right_);
+    comma_pair->right()->require_nil();
+    return comma_pair->left()->evaluate(interpreter, comma_pair->left());
+  }
+  return std::make_shared<Pair>(
+    left_->evaluate_commas(interpreter, left_), right_->evaluate_commas(interpreter, right_), loc());
+}
+
 static auto aux_keyword = Interpreter::static_symbol_value("&aux");
 static auto key_keyword = Interpreter::static_symbol_value("&key");
 static auto rest_keyword = Interpreter::static_symbol_value("&rest");
 static auto optional_keyword = Interpreter::static_symbol_value("&optional");
 
-parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& spec) {
+parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpreter) {
   auto next_param = spec;
 
   auto is_keyword = [](const auto& symbol_value) {
@@ -408,7 +463,7 @@ parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& 
 
         } else {
           symbol_value = binding_pair->left()->require_symbol(*binding_pair->loc());
-          keyword_symbol = interpreter.get_symbol_value(':' + *symbol_value);
+          keyword_symbol = Interpreter::get_symbol_value(':' + *symbol_value, interpreter);
         }
         if (*binding_pair->right()) {
           auto initform_pair = binding_pair->right()->require_pair(binding_pair->right());
@@ -422,7 +477,7 @@ parameters::parameters (Interpreter& interpreter, const std::shared_ptr<Value>& 
       } else {
         auto loc = next_param_pair->loc();
         symbol_value = next_param_pair->left()->require_symbol(*loc);
-        keyword_symbol = interpreter.get_symbol_value(':' + *symbol_value);
+        keyword_symbol = Interpreter::get_symbol_value(':' + *symbol_value, interpreter);
         if (is_keyword(symbol_value)) {
           process_aux(symbol_value, *loc);
           break;

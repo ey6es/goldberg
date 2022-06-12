@@ -30,6 +30,8 @@ public:
 
   std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
 
+  std::shared_ptr<Value> require (const std::string& filename);
+
   std::shared_ptr<Value> load (const std::string& filename);
   std::shared_ptr<Value> load (std::istream& in, const std::string& filename);
 
@@ -46,15 +48,16 @@ private:
 
   static std::shared_ptr<Invocation> create_builtin_context ();
 
-  std::shared_ptr<Value> parse (std::istream& in, location& loc);
-  std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);
-  std::shared_ptr<Value> parse_rest (std::istream& in, location& loc);
+  static std::shared_ptr<Value> parse (const std::string& string);
+  static std::shared_ptr<Value> parse (std::istream& in, location& loc, Interpreter* interpreter = nullptr);
+  static std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token, Interpreter* interpreter);
+  static std::shared_ptr<Value> parse_rest (std::istream& in, location& loc, Interpreter* interpreter);
 
-  lexeme lex (std::istream& in, location& loc);
+  static lexeme lex (std::istream& in, location& loc, Interpreter* interpreter);
+
+  static std::shared_ptr<std::string> get_symbol_value (const std::string& value, Interpreter* interpreter);
 
   std::shared_ptr<Value> evaluate (const std::shared_ptr<Value>& value);
-
-  std::shared_ptr<std::string> get_symbol_value (const std::string& value);
 
   std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
 
@@ -64,6 +67,8 @@ private:
   std::unordered_map<std::string, std::weak_ptr<std::string>> symbol_values_;
 
   std::vector<stack_frame> call_stack_;
+
+  std::unordered_map<std::string, std::shared_ptr<Value>> required_files_;
 };
 
 class Pair;
@@ -86,6 +91,7 @@ public:
 
   void require_nil () const;
   virtual double require_number (const location& loc) const;
+  virtual std::string require_string (const location& loc) const;
   std::shared_ptr<std::string> require_symbol (const location& loc) const;
   std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
 
@@ -101,6 +107,7 @@ public:
 
   virtual std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const { return self; }
   virtual std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
+  virtual std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
 
   virtual std::shared_ptr<Value> invoke (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
@@ -156,6 +163,8 @@ public:
 
   explicit String (const std::string& value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
 
+  std::string require_string (const location& loc) const override { return value_; }
+
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_string(value_); }
   bool equals_string (const std::string& value) const override { return value == value_; }
 
@@ -210,6 +219,7 @@ public:
 
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
   std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+  std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
 private:
 
@@ -264,7 +274,7 @@ private:
 class parameters {
 public:
 
-  parameters (Interpreter& interpreter, const std::shared_ptr<Value>& spec);
+  parameters (const std::shared_ptr<Value>& spec, Interpreter* interpreter = nullptr);
 
   void bind (Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const;
 
@@ -304,6 +314,21 @@ public:
 private:
 
   std::shared_ptr<Invocation> parent_context_;
+  parameters parameters_;
+  std::shared_ptr<Value> body_;
+};
+
+class Macro : public NamedValue {
+public:
+
+  Macro (
+    const std::string& name,
+    parameters&& parameters,
+    const std::shared_ptr<Value>& body)
+      : NamedValue(name), parameters_(parameters), body_(body) {}
+
+private:
+
   parameters parameters_;
   std::shared_ptr<Value> body_;
 };

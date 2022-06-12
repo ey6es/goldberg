@@ -100,8 +100,19 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
   define(ctx, "t", t_);
   define(ctx, "pi", std::make_shared<Number>(M_PI));
 
+  auto define_macro = [&](const std::string& name, const std::string& definition) {
+    auto parsed_definition = parse(definition);
+    auto definition_pair = parsed_definition->require_pair(parsed_definition);
+    define(ctx, name, std::make_shared<Macro>(name, parameters(definition_pair->left()), definition_pair->right()));
+  };
+
   define_native_operator(ctx, "quote", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return require_1(args);
+  });
+
+  define_native_operator(ctx, "backquote", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->evaluate_commas(interpreter, arg);
   });
 
   define_native_operator(ctx, "if", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -146,13 +157,35 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
     return std::make_shared<Lambda>(
       "lambda",
       interpreter.current_context(),
-      parameters(interpreter, arg_pair->left()),
+      parameters(arg_pair->left(), &interpreter),
       arg_pair->right());
+  });
+
+  define_native_operator(ctx, "setq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto next = args;
+    auto last_result = Interpreter::nil();
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      auto symbol_value = next_pair->left()->require_symbol(*next_pair->loc());
+      next = next_pair->right();
+      next_pair = next->require_pair(next);
+      last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
+      //interpreter.current_context()->define(symbol_value, last_result);
+      next = next_pair->right();
+    }
+    return last_result;
   });
 
   define_native_function(ctx, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
     return arg->evaluate(interpreter, arg);
+  });
+
+  define_native_function(ctx, "load", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return interpreter.load(require_1(args)->require_string(*args->loc()));
+  });
+  define_native_function(ctx, "require", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return interpreter.require(require_1(args)->require_string(*args->loc()));
   });
 
   define_native_function(ctx, "eq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {

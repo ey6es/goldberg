@@ -11,6 +11,8 @@ std::shared_ptr<Value> Interpreter::nil_ = std::make_shared<Nil>();
 
 std::unordered_map<std::string, std::shared_ptr<std::string>> Interpreter::static_symbol_values_;
 
+bindings Interpreter::static_bindings_ = create_static_bindings();
+
 std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string& value) {
   auto& pointer = static_symbol_values_[value];
   if (!pointer) pointer = std::make_shared<std::string>(value);
@@ -18,8 +20,7 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 }
 
 Interpreter::Interpreter () {
-  static auto builtin_context = create_builtin_context();
-  push_frame(std::make_shared<Invocation>(builtin_context));
+  push_frame(std::make_shared<Invocation>());
 }
 
 const std::shared_ptr<Invocation>& Interpreter::current_context () const {
@@ -46,7 +47,9 @@ std::shared_ptr<Value> Interpreter::load (std::istream& in, const std::string& f
   location loc{std::make_shared<std::string>(filename), 1, 1};
   std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
   while (in) {
-    auto result = evaluate(parse(in, loc, this));
+    auto parsed = parse(in, loc, this);
+    auto compiled = parsed->compile(*this, parsed);
+    auto result = compiled->evaluate(*this, compiled);
     if (*result) last_result = result;
   }
   return last_result;
@@ -294,20 +297,13 @@ std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& v
   return new_symbol_value;
 }
 
-std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value>& value) {
-  return value->evaluate(*this, value);
-}
-
 std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& symbol_value) const {
-  auto it = call_stack_.rbegin();
-  auto lexical_value = it->context->lookup(symbol_value);
-  if (lexical_value) return lexical_value;
-
-  for (; it != call_stack_.rend(); ++it) {
-    auto value = it->dynamic_vars.find(symbol_value);
-    if (value != it->dynamic_vars.end()) return value->second;
+  for (auto it = binding_stack_.rbegin(); it != binding_stack_.rend(); ++it) {
+    auto pair = it->find(symbol_value);
+    if (pair != it->end()) return pair->second;
   }
-  return std::shared_ptr<Value>();
+  auto pair = static_bindings_.find(symbol_value);
+  return pair == static_bindings_.end() ? nullptr : pair->second;
 }
 
 void Interpreter::push_frame (const std::shared_ptr<Invocation>& context) {
@@ -338,6 +334,18 @@ std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) c
   throw script_error("Expected argument", *loc());
 }
 
+std::shared_ptr<Value> Value::compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return compile(interpreter, self);
+}
+
+std::shared_ptr<Value> Value::compile_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return self;
+}
+
+std::shared_ptr<Value> Value::expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const {
+  return std::make_shared<Pair>(self, pair.right()->compile_rest(interpreter, pair.right()), pair.loc());
+}
+
 std::shared_ptr<Value> Value::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   return evaluate(interpreter, self);
 }
@@ -346,8 +354,8 @@ std::shared_ptr<Value> Value::evaluate_commas (Interpreter& interpreter, const s
   return self;
 }
 
-std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  throw script_error("Expected function", loc);
+std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const Pair& pair) const {
+  throw script_error("Expected function", *pair.loc());
 }
 
 std::string Number::to_string () const {
@@ -376,16 +384,32 @@ std::string String::to_string () const {
   return string += '"';
 }
 
-std::shared_ptr<Value> Symbol::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+std::shared_ptr<Value> Symbol::compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   if (value_->size() > 0 && value_->front() == ':') return self;
   auto result = interpreter.lookup(value_);
   if (result) return result;
   throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
 }
 
+std::shared_ptr<Value> Pair::compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto left = left_->compile(interpreter, left_);
+  return left->expand(interpreter, *this, left);
+}
+
+std::shared_ptr<Value> Pair::compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto left = left_->compile(interpreter, left_);
+  auto right = right_->compile_rest(interpreter, right_);
+  return std::make_shared<Pair>(left, right, loc());
+}
+
+std::shared_ptr<Value> Pair::compile_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return left_->as_symbol() == comma_symbol
+    ? std::make_shared<Pair>(left_, right_->compile(interpreter, right_), loc())
+    : std::make_shared<Pair>(left_->compile_commas(interpreter, left_), right_->compile_commas(interpreter, right_), loc());
+}
+
 std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  auto fn = left_->evaluate(interpreter, left_);
-  return fn->invoke(interpreter, right_, *loc());
+  return left_->evaluate(interpreter, left_)->invoke(interpreter, *this);
 }
 
 std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -409,7 +433,7 @@ static auto key_keyword = Interpreter::static_symbol_value("&key");
 static auto rest_keyword = Interpreter::static_symbol_value("&rest");
 static auto optional_keyword = Interpreter::static_symbol_value("&optional");
 
-parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpreter) {
+void parameters::init (const std::shared_ptr<Value>& spec, Interpreter* interpreter) {
   auto next_param = spec;
 
   auto is_keyword = [](const auto& symbol_value) {
@@ -436,7 +460,7 @@ parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpr
       } else {
         symbol_value = next_param_pair->left()->require_symbol(*next_param_pair->loc());
       }
-      aux_.push_back({symbol_value, initform});
+      aux.push_back({symbol_value, initform});
     }
   };
 
@@ -483,7 +507,7 @@ parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpr
           break;
         }
       }
-      key_[keyword_symbol] = {symbol_value, initform, svar};
+      key[keyword_symbol] = {symbol_value, initform, svar};
     }
   };
 
@@ -493,7 +517,7 @@ parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpr
       return;
     }
     auto next_param_pair = next_param->require_pair(next_param);
-    rest_ = next_param_pair->left()->require_symbol(*next_param_pair->loc());
+    rest = next_param_pair->left()->require_symbol(*next_param_pair->loc());
     next_param = next_param_pair->right();
     if (*next_param) {
       next_param_pair = next_param->require_pair(next_param);
@@ -536,7 +560,7 @@ parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpr
           break;
         }
       }
-      optional_.push_back({symbol_value, initform, svar});
+      optional.push_back({symbol_value, initform, svar});
     }
   };
 
@@ -549,7 +573,7 @@ parameters::parameters (const std::shared_ptr<Value>& spec, Interpreter* interpr
       process_optional(symbol_value, *loc);
       break;
     }
-    required_.push_back(symbol_value);
+    required.push_back(symbol_value);
   }
 }
 
@@ -557,25 +581,25 @@ void parameters::bind (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const {
   auto next_arg = args;
 
-  for (auto& var : required_) {
+  for (auto& var : required) {
     auto next_arg_pair = next_arg->require_pair(next_arg);
     ctx->define(var, next_arg_pair->left());
     next_arg = next_arg_pair->right();
   }
-  for (auto& optional : optional_) {
+  for (auto& optional_param : optional) {
     if (*next_arg) {
       auto next_arg_pair = next_arg->require_pair(next_arg);
-      ctx->define(optional.var, next_arg_pair->left());
-      if (optional.svar) ctx->define(optional.svar, Interpreter::t());
+      ctx->define(optional_param.var, next_arg_pair->left());
+      if (optional_param.svar) ctx->define(optional_param.svar, Interpreter::t());
       next_arg = next_arg_pair->right();
 
     } else {
-      ctx->define(optional.var, optional.initform->evaluate(interpreter, optional.initform));
-      if (optional.svar) ctx->define(optional.svar, Interpreter::nil());
+      ctx->define(optional_param.var, optional_param.initform->evaluate(interpreter, optional_param.initform));
+      if (optional_param.svar) ctx->define(optional_param.svar, Interpreter::nil());
     }
   }
   auto filtered_rest = next_arg;
-  if (!key_.empty()) {
+  if (!key.empty()) {
     filtered_rest = Interpreter::nil();
     std::shared_ptr<Pair> last_filtered;
 
@@ -584,8 +608,8 @@ void parameters::bind (
       auto symbol_value = next_arg_pair->left()->as_symbol();
       next_arg = next_arg_pair->right();
       if (symbol_value) {
-        auto it = key_.find(symbol_value);
-        if (it != key_.end()) {
+        auto it = key.find(symbol_value);
+        if (it != key.end()) {
           next_arg_pair = next_arg->require_pair(next_arg);
           ctx->define(it->second.var, next_arg_pair->left());
           if (it->second.svar) ctx->define(it->second.svar, Interpreter::t());
@@ -599,37 +623,92 @@ void parameters::bind (
       last_filtered = new_last;
     }
 
-    for (auto& pair : key_) {
+    for (auto& pair : key) {
       if (!ctx->is_defined(pair.second.var)) {
         ctx->define(pair.second.var, pair.second.initform->evaluate(interpreter, pair.second.initform));
         ctx->define(pair.second.svar, Interpreter::nil());
       }
     }
   }
-  if (rest_) ctx->define(rest_, filtered_rest);
+  if (rest) ctx->define(rest, filtered_rest);
   else filtered_rest->require_nil();
 
-  for (auto& aux : aux_) {
-    ctx->define(aux.var, aux.initform->evaluate(interpreter, aux.initform));
+  for (auto& aux_param : aux) {
+    ctx->define(aux_param.var, aux_param.initform->evaluate(interpreter, aux_param.initform));
   }
 }
 
-std::shared_ptr<Value> Lambda::invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
+LambdaDefinition::LambdaDefinition (const std::string& name, Interpreter& interpreter, const std::shared_ptr<Value>& args)
+    : NamedValue(name) {
+  auto arg_pair = args->require_pair(args);
+  params_.init(arg_pair->left(), &interpreter);
+
+  bindings ctx;
+  for (auto& var : params_.required) ctx[var] = std::make_shared<Variable>(var);
+  for (auto& optional_param : params_.optional) {
+    ctx[optional_param.var] = std::make_shared<Variable>(optional_param.var);
+    if (optional_param.svar) ctx[optional_param.svar] = std::make_shared<Variable>(optional_param.svar);
+    optional_param.initform = optional_param.initform->compile(interpreter, optional_param.initform);
+  }
+  if (params_.rest) ctx[params_.rest] = std::make_shared<Variable>(params_.rest);
+  for (auto& pair : params_.key) {
+    ctx[pair.second.var] = std::make_shared<Variable>(pair.second.var);
+    if (pair.second.svar) ctx[pair.second.svar] = std::make_shared<Variable>(pair.second.svar);
+    pair.second.initform = pair.second.initform->compile(interpreter, pair.second.initform);
+  }
+  for (auto& aux_param : params_.aux) {
+    ctx[aux_param.var] = std::make_shared<Variable>(aux_param.var);
+    aux_param.initform = aux_param.initform->compile(interpreter, aux_param.initform);
+  }
+
+  struct bindings_scope {
+    Interpreter& interpreter;
+
+    bindings_scope (Interpreter& interpreter, bindings&& ctx) : interpreter(interpreter) {
+      interpreter.push_bindings(std::move(ctx)); }
+    ~bindings_scope () { interpreter.pop_bindings(); }
+
+  } scope(interpreter, std::move(ctx));
+
+  body_ = arg_pair->right()->compile_rest(interpreter, arg_pair->right());
+}
+
+std::shared_ptr<Value> LambdaDefinition::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return std::make_shared<LambdaFunction>(std::static_pointer_cast<LambdaDefinition>(self), interpreter.current_context());
+}
+
+std::shared_ptr<Value> LambdaFunction::invoke (Interpreter& interpreter, const Pair& pair) const {
   auto ctx = std::make_shared<Invocation>(parent_context_);
-  parameters_.bind(interpreter, args->evaluate_rest(interpreter, args), ctx);
-  interpreter.push_frame(ctx);
+  definition_->params().bind(interpreter, pair.right()->evaluate_rest(interpreter, pair.right()), ctx);
+
+  struct frame_scope {
+    Interpreter& interpreter;
+
+    frame_scope (Interpreter& interpreter, const std::shared_ptr<Invocation>& ctx) : interpreter(interpreter) {
+      interpreter.push_frame(ctx); }
+    ~frame_scope () { interpreter.pop_frame(); }
+
+  } scope(interpreter, ctx);
 
   auto last_result = Interpreter::nil();
-  auto next_statement = body_;
+  auto next_statement = definition_->body();
   while (*next_statement) {
     auto next_statement_pair = next_statement->require_pair(next_statement);
     last_result = next_statement_pair->left()->evaluate(interpreter, next_statement_pair->left());
     next_statement = next_statement_pair->right();
   }
-  interpreter.pop_frame();
 
   return last_result;
+}
+
+std::shared_ptr<Value> Variable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return interpreter.current_context()->lookup(symbol_value_);
+}
+
+Macro::Macro (const std::string& name, const std::shared_ptr<Value>& definition) : NamedValue(name) {
+  auto definition_pair = definition->require_pair(definition);
+  params_.init(definition_pair->left());
+  body_ = definition_pair->right();
 }
 
 void Invocation::define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
@@ -637,9 +716,9 @@ void Invocation::define (const std::shared_ptr<std::string>& symbol_value, const
 }
 
 std::shared_ptr<Value> Invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {
-  auto value = values_.find(symbol_value);
-  if (value != values_.end()) return value->second;
-  return parent_ ? parent_->lookup(symbol_value) : std::shared_ptr<Value>();
+  auto pair = values_.find(symbol_value);
+  if (pair != values_.end()) return pair->second;
+  return parent_ ? parent_->lookup(symbol_value) : Interpreter::nil();
 }
 
 }

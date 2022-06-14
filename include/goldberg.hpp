@@ -16,6 +16,8 @@ struct lexeme;
 struct location;
 struct stack_frame;
 
+typedef std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> bindings;
+
 class Interpreter {
 public:
 
@@ -38,7 +40,8 @@ public:
 private:
 
   friend class Symbol;
-  friend class Lambda;
+  friend class LambdaDefinition;
+  friend class LambdaFunction;
   friend struct parameters;
 
   static std::shared_ptr<Value> t_;
@@ -46,7 +49,9 @@ private:
 
   static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
 
-  static std::shared_ptr<Invocation> create_builtin_context ();
+  static bindings static_bindings_;
+
+  static bindings create_static_bindings ();
 
   static std::shared_ptr<Value> parse (const std::string& string);
   static std::shared_ptr<Value> parse (std::istream& in, location& loc, Interpreter* interpreter = nullptr);
@@ -57,7 +62,8 @@ private:
 
   static std::shared_ptr<std::string> get_symbol_value (const std::string& value, Interpreter* interpreter);
 
-  std::shared_ptr<Value> evaluate (const std::shared_ptr<Value>& value);
+  void push_bindings (bindings&& ctx) { binding_stack_.push_back(ctx); }
+  void pop_bindings () { binding_stack_.pop_back(); }
 
   std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
 
@@ -65,6 +71,8 @@ private:
   void pop_frame () { call_stack_.pop_back(); }
 
   std::unordered_map<std::string, std::weak_ptr<std::string>> symbol_values_;
+
+  std::vector<bindings> binding_stack_;
 
   std::vector<stack_frame> call_stack_;
 
@@ -105,12 +113,17 @@ public:
   virtual std::string to_string () const = 0;
   virtual std::string to_rest_string () const { return " . " + to_string(); }
 
+  virtual std::shared_ptr<Value> compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const { return self; }
+  virtual std::shared_ptr<Value> compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
+  virtual std::shared_ptr<Value> compile_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
+
+  virtual std::shared_ptr<Value> expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const;
+
   virtual std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const { return self; }
   virtual std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
   virtual std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
 
-  virtual std::shared_ptr<Value> invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
+  virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
 
 private:
 
@@ -188,7 +201,7 @@ public:
 
   std::string to_string () const override { return *value_; }
 
-  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+  std::shared_ptr<Value> compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
 private:
 
@@ -217,6 +230,10 @@ public:
   std::string to_string () const override { return '(' + left_->to_string() + right_->to_rest_string() + ')'; }
   std::string to_rest_string () const override { return ' ' + left_->to_string() + right_->to_rest_string(); }
 
+  std::shared_ptr<Value> compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+  std::shared_ptr<Value> compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+  std::shared_ptr<Value> compile_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
   std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
   std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
@@ -239,97 +256,147 @@ private:
   std::string name_;
 };
 
-template<typename T>
-class NativeOperator : public NamedValue {
+template<typename Expand>
+class Expander : public NamedValue {
 public:
 
-  NativeOperator (const std::string& name, const T& function) : NamedValue(name), function_(function) {}
+  Expander (const std::string& name, const Expand& expand) : NamedValue(name), expand_(expand) {}
 
-  std::shared_ptr<Value> invoke (
-      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
-    return function_(interpreter, args);
+  std::shared_ptr<Value> expand (
+      Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const override {
+    return expand_(interpreter, pair, self);
   }
 
 private:
 
-  T function_;
+  Expand expand_;
 };
 
-template<typename T>
+template<typename Invoke>
+class Operator : public NamedValue {
+public:
+
+  Operator (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
+
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
+    return invoke_(interpreter, pair.right());
+  }
+
+private:
+
+  Invoke invoke_;
+};
+
+template<typename Expand, typename Invoke>
+class ExpandOperator : public Expander<Expand> {
+public:
+
+  ExpandOperator (const std::string& name, const Expand& expand, const Invoke& invoke)
+    : Expander<Expand>(name, expand), invoke_(invoke) {}
+
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
+    return invoke_(interpreter, pair.right());
+  }
+
+private:
+
+  Invoke invoke_;
+};
+
+template<typename Invoke>
 class NativeFunction : public NamedValue {
 public:
 
-  NativeFunction (const std::string& name, const T& function) : NamedValue(name), function_(function) {}
+  NativeFunction (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (
-      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
-    return function_(interpreter, args->evaluate_rest(interpreter, args));
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
+    return invoke_(interpreter, pair.right()->evaluate_rest(interpreter, pair.right()));
   }
 
 private:
 
-  T function_;
+  Invoke invoke_;
 };
 
-class parameters {
-public:
-
-  parameters (const std::shared_ptr<Value>& spec, Interpreter* interpreter = nullptr);
-
-  void bind (Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const;
-
-private:
-
-  struct optional {
+struct parameters {
+  struct optional_parameter {
     std::shared_ptr<std::string> var;
     std::shared_ptr<Value> initform;
     std::shared_ptr<std::string> svar;
   };
 
-  struct aux {
+  struct aux_parameter {
     std::shared_ptr<std::string> var;
     std::shared_ptr<Value> initform;
   };
 
-  std::vector<std::shared_ptr<std::string>> required_;
-  std::vector<optional> optional_;
-  std::shared_ptr<std::string> rest_;
-  std::unordered_map<std::shared_ptr<std::string>, optional> key_;
-  std::vector<aux> aux_;
+  std::vector<std::shared_ptr<std::string>> required;
+  std::vector<optional_parameter> optional;
+  std::shared_ptr<std::string> rest;
+  std::unordered_map<std::shared_ptr<std::string>, optional_parameter> key;
+  std::vector<aux_parameter> aux;
+
+  void init (const std::shared_ptr<Value>& spec, Interpreter* interpreter = nullptr);
+
+  void bind (Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const;
 };
 
-class Lambda : public NamedValue {
+class LambdaDefinition : public NamedValue {
 public:
+  
+  LambdaDefinition (const std::string& name, Interpreter& interpreter, const std::shared_ptr<Value>& args);
 
-  Lambda (
-    const std::string& name,
-    const std::shared_ptr<Invocation>& parent_context,
-    parameters&& parameters,
-    const std::shared_ptr<Value>& body)
-      : NamedValue(name), parent_context_(parent_context), parameters_(parameters), body_(body) {}
+  const parameters& params () const { return params_; }
 
-  std::shared_ptr<Value> invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
+  const std::shared_ptr<Value>& body () const { return body_; }
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
 private:
 
-  std::shared_ptr<Invocation> parent_context_;
-  parameters parameters_;
+  parameters params_;
   std::shared_ptr<Value> body_;
+};
+
+class LambdaFunction : public Value {
+public:
+
+  LambdaFunction (const std::shared_ptr<LambdaDefinition>& definition, const std::shared_ptr<Invocation>& parent_context)
+    : definition_(definition), parent_context_(parent_context) {}
+
+  std::string to_string () const override { return definition_->to_string(); }
+
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override;
+
+private:
+
+  std::shared_ptr<LambdaDefinition> definition_;
+  std::shared_ptr<Invocation> parent_context_;
+};
+
+class Variable : public Value {
+public:
+
+  explicit Variable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+    : Value(loc), symbol_value_(symbol_value) {}
+
+  std::string to_string () const override { return *symbol_value_; }
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+private:
+
+  std::shared_ptr<std::string> symbol_value_;
 };
 
 class Macro : public NamedValue {
 public:
 
-  Macro (
-    const std::string& name,
-    parameters&& parameters,
-    const std::shared_ptr<Value>& body)
-      : NamedValue(name), parameters_(parameters), body_(body) {}
+  Macro (const std::string& name, const std::shared_ptr<Value>& definition);
 
 private:
 
-  parameters parameters_;
+  parameters params_;
   std::shared_ptr<Value> body_;
 };
 

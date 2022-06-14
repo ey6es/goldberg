@@ -9,18 +9,28 @@ namespace goldberg {
 
 namespace {
 
-inline void define (const std::shared_ptr<Invocation>& ctx, const std::string& name, const std::shared_ptr<Value>& value) {
-  ctx->define(Interpreter::static_symbol_value(name), value);
+inline void define (bindings& ctx, const std::string& name, const std::shared_ptr<Value>& value) {
+  ctx[Interpreter::static_symbol_value(name)] = value;
 }
 
-template<typename T>
-inline void define_native_operator (const std::shared_ptr<Invocation>& ctx, const std::string& name, T function) {
-  define(ctx, name, std::make_shared<NativeOperator<T>>(name, function));
+template<typename Expand>
+inline void define_expander (bindings& ctx, const std::string& name, const Expand& expand) {
+  define(ctx, name, std::make_shared<Expander<Expand>>(name, expand));
 }
 
-template<typename T>
-inline void define_native_function (const std::shared_ptr<Invocation>& ctx, const std::string& name, T function) {
-  define(ctx, name, std::make_shared<NativeFunction<T>>(name, function));
+template<typename Invoke>
+inline void define_operator (bindings& ctx, const std::string& name, const Invoke& invoke) {
+  define(ctx, name, std::make_shared<Operator<Invoke>>(name, invoke));
+}
+
+template<typename Expand, typename Invoke>
+inline void define_expand_operator (bindings& ctx, const std::string& name, const Expand& expand, const Invoke& invoke) {
+  define(ctx, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
+}
+
+template<typename Invoke>
+inline void define_native_function (bindings& ctx, const std::string& name, const Invoke& invoke) {
+  define(ctx, name, std::make_shared<NativeFunction<Invoke>>(name, invoke));
 }
 
 inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
@@ -93,29 +103,43 @@ std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list,
 
 }
 
-std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
-  auto ctx = std::make_shared<Invocation>();
+bindings Interpreter::create_static_bindings () {
+  bindings ctx;
 
   define(ctx, "nil", nil_);
   define(ctx, "t", t_);
   define(ctx, "pi", std::make_shared<Number>(M_PI));
 
   auto define_macro = [&](const std::string& name, const std::string& definition) {
-    auto parsed_definition = parse(definition);
-    auto definition_pair = parsed_definition->require_pair(parsed_definition);
-    define(ctx, name, std::make_shared<Macro>(name, parameters(definition_pair->left()), definition_pair->right()));
+    define(ctx, name, std::make_shared<Macro>(name, parse(definition)));
   };
 
-  define_native_operator(ctx, "quote", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    return require_1(args);
-  });
+  define_expand_operator(
+    ctx, "quote",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      return std::make_shared<Pair>(self, pair.right(), pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      return require_1(args);
+    });
 
-  define_native_operator(ctx, "backquote", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto arg = require_1(args);
-    return arg->evaluate_commas(interpreter, arg);
-  });
+  define_expand_operator(
+    ctx, "backquote",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      return std::make_shared<Pair>(self, pair.right()->compile_commas(interpreter, pair.right()), pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto arg = require_1(args);
+      return arg->evaluate_commas(interpreter, arg);
+    });
 
-  define_native_operator(ctx, "if", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_expander(
+    ctx, "lambda",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      return std::make_shared<LambdaDefinition>("lambda", interpreter, pair.right());
+    });
+
+  define_operator(ctx, "if", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto cond_pair = args->require_pair(args);
     auto true_pair = cond_pair->right()->require_pair(cond_pair->right());
     auto false_expr = true_pair->right();
@@ -129,7 +153,7 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
       : false_expr->evaluate(interpreter, false_expr);
   });
 
-  define_native_operator(ctx, "and", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "and", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto value = t_;
     auto next = args;
     while (*next) {
@@ -141,7 +165,7 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
     return value;
   });
 
-  define_native_operator(ctx, "or", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "or", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     while (*next) {
       auto next_pair = next->require_pair(next);
@@ -152,16 +176,7 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
     return nil_;
   });
 
-  define_native_operator(ctx, "lambda", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto arg_pair = args->require_pair(args);
-    return std::make_shared<Lambda>(
-      "lambda",
-      interpreter.current_context(),
-      parameters(arg_pair->left(), &interpreter),
-      arg_pair->right());
-  });
-
-  define_native_operator(ctx, "setq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "setq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     auto last_result = Interpreter::nil();
     while (*next) {
@@ -178,7 +193,8 @@ std::shared_ptr<Invocation> Interpreter::create_builtin_context () {
 
   define_native_function(ctx, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
-    return arg->evaluate(interpreter, arg);
+    auto compiled = arg->compile(interpreter, arg);
+    return compiled->evaluate(interpreter, compiled);
   });
 
   define_native_function(ctx, "load", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {

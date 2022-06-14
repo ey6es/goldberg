@@ -125,6 +125,8 @@ public:
 
   virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
 
+  virtual void set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
+
 private:
 
   std::shared_ptr<location> loc_;
@@ -343,7 +345,7 @@ struct parameters {
 
 class LambdaDefinition : public NamedValue {
 public:
-  
+
   LambdaDefinition (const std::string& name, Interpreter& interpreter, const std::shared_ptr<Value>& args);
 
   const parameters& params () const { return params_; }
@@ -384,6 +386,8 @@ public:
 
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
+  void set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
+
 private:
 
   std::shared_ptr<std::string> symbol_value_;
@@ -410,6 +414,8 @@ public:
   void define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 
   std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
+
+  void set (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 
 private:
 

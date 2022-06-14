@@ -181,11 +181,11 @@ bindings Interpreter::create_static_bindings () {
     auto last_result = Interpreter::nil();
     while (*next) {
       auto next_pair = next->require_pair(next);
-      auto symbol_value = next_pair->left()->require_symbol(*next_pair->loc());
+      auto variable = next_pair->left();
       next = next_pair->right();
       next_pair = next->require_pair(next);
       last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
-      //interpreter.current_context()->define(symbol_value, last_result);
+      variable->set(interpreter, last_result, *args->loc());
       next = next_pair->right();
     }
     return last_result;

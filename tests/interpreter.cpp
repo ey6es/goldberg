@@ -197,4 +197,6 @@ TEST_CASE("lambda expressions can be evaluated", "[lambda]") {
   REQUIRE(interpreter.evaluate("((lambda (&optional b &rest rest) rest) 3 2 1)")->to_string() == "(2 1)");
 
   REQUIRE(interpreter.evaluate("((lambda (a &key b c d) (list b c)) 1 :c 2 :b 1)")->to_string() == "(1 2)");
+
+  REQUIRE(interpreter.evaluate("((lambda (a) (setq a 2) (+ a 1)) (* 3 3))")->to_string() == "3");
 }

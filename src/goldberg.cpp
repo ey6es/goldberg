@@ -358,6 +358,10 @@ std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const Pair& pair
   throw script_error("Expected function", *pair.loc());
 }
 
+void Value::set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+  throw script_error("Expected variable", loc);
+}
+
 std::string Number::to_string () const {
   std::ostringstream out;
   out << value_;
@@ -705,6 +709,10 @@ std::shared_ptr<Value> Variable::evaluate (Interpreter& interpreter, const std::
   return interpreter.current_context()->lookup(symbol_value_);
 }
 
+void Variable::set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+  interpreter.current_context()->set(symbol_value_, value);
+}
+
 Macro::Macro (const std::string& name, const std::shared_ptr<Value>& definition) : NamedValue(name) {
   auto definition_pair = definition->require_pair(definition);
   params_.init(definition_pair->left());
@@ -719,6 +727,12 @@ std::shared_ptr<Value> Invocation::lookup (const std::shared_ptr<std::string>& s
   auto pair = values_.find(symbol_value);
   if (pair != values_.end()) return pair->second;
   return parent_ ? parent_->lookup(symbol_value) : Interpreter::nil();
+}
+
+void Invocation::set (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
+  auto pair = values_.find(symbol_value);
+  if (pair != values_.end()) pair->second = value;
+  else if (parent_) parent_->set(symbol_value, value);
 }
 
 }

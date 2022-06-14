@@ -20,11 +20,8 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 }
 
 Interpreter::Interpreter () {
+  push_bindings({});
   push_frame(std::make_shared<Invocation>());
-}
-
-const std::shared_ptr<Invocation>& Interpreter::current_context () const {
-  return call_stack_.back().context;
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const std::string& filename) {
@@ -297,7 +294,7 @@ std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& v
   return new_symbol_value;
 }
 
-std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& symbol_value) const {
+std::shared_ptr<Value> Interpreter::lookup_binding (const std::shared_ptr<std::string>& symbol_value) const {
   for (auto it = binding_stack_.rbegin(); it != binding_stack_.rend(); ++it) {
     auto pair = it->find(symbol_value);
     if (pair != it->end()) return pair->second;
@@ -306,8 +303,19 @@ std::shared_ptr<Value> Interpreter::lookup (const std::shared_ptr<std::string>& 
   return pair == static_bindings_.end() ? nullptr : pair->second;
 }
 
-void Interpreter::push_frame (const std::shared_ptr<Invocation>& context) {
-  call_stack_.push_back({context});
+std::shared_ptr<Value> Interpreter::lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const {
+  for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+    auto value = (*it)->lookup_dynamic_value(symbol_value);
+    if (value) return value;
+  }
+  return Interpreter::nil();
+}
+
+void Interpreter::set_dynamic_value (
+    const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) const {
+  for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+    if ((*it)->set_dynamic_value(symbol_value, value)) return;
+  }
 }
 
 void Value::require_nil () const {
@@ -358,7 +366,7 @@ std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const Pair& pair
   throw script_error("Expected function", *pair.loc());
 }
 
-void Value::set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+void Value::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
   throw script_error("Expected variable", loc);
 }
 
@@ -390,7 +398,7 @@ std::string String::to_string () const {
 
 std::shared_ptr<Value> Symbol::compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   if (value_->size() > 0 && value_->front() == ':') return self;
-  auto result = interpreter.lookup(value_);
+  auto result = interpreter.lookup_binding(value_);
   if (result) return result;
   throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
 }
@@ -648,20 +656,29 @@ LambdaDefinition::LambdaDefinition (const std::string& name, Interpreter& interp
   params_.init(arg_pair->left(), &interpreter);
 
   bindings ctx;
-  for (auto& var : params_.required) ctx[var] = std::make_shared<Variable>(var);
+
+  auto add_binding = [&](const std::shared_ptr<std::string>& symbol_value) {
+    // preserve existing variable bindings in case they're dynamic/constant
+    auto existing_binding = interpreter.lookup_binding(symbol_value);
+    if (!(existing_binding && existing_binding->is_variable())) {
+      ctx[symbol_value] = std::make_shared<LexicalVariable>(symbol_value);
+    }
+  };
+
+  for (auto& var : params_.required) add_binding(var);
   for (auto& optional_param : params_.optional) {
-    ctx[optional_param.var] = std::make_shared<Variable>(optional_param.var);
-    if (optional_param.svar) ctx[optional_param.svar] = std::make_shared<Variable>(optional_param.svar);
+    add_binding(optional_param.var);
+    if (optional_param.svar) add_binding(optional_param.svar);
     optional_param.initform = optional_param.initform->compile(interpreter, optional_param.initform);
   }
-  if (params_.rest) ctx[params_.rest] = std::make_shared<Variable>(params_.rest);
+  if (params_.rest) add_binding(params_.rest);
   for (auto& pair : params_.key) {
-    ctx[pair.second.var] = std::make_shared<Variable>(pair.second.var);
-    if (pair.second.svar) ctx[pair.second.svar] = std::make_shared<Variable>(pair.second.svar);
+    add_binding(pair.second.var);
+    if (pair.second.svar) add_binding(pair.second.svar);
     pair.second.initform = pair.second.initform->compile(interpreter, pair.second.initform);
   }
   for (auto& aux_param : params_.aux) {
-    ctx[aux_param.var] = std::make_shared<Variable>(aux_param.var);
+    add_binding(aux_param.var);
     aux_param.initform = aux_param.initform->compile(interpreter, aux_param.initform);
   }
 
@@ -705,12 +722,24 @@ std::shared_ptr<Value> LambdaFunction::invoke (Interpreter& interpreter, const P
   return last_result;
 }
 
-std::shared_ptr<Value> Variable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  return interpreter.current_context()->lookup(symbol_value_);
+std::shared_ptr<Value> LexicalVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return interpreter.current_context()->lookup_lexical_value(symbol_value());
 }
 
-void Variable::set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
-  interpreter.current_context()->set(symbol_value_, value);
+void LexicalVariable::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+  interpreter.current_context()->set_lexical_value(symbol_value(), value);
+}
+
+std::shared_ptr<Value> DynamicVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return interpreter.lookup_dynamic_value(symbol_value());
+}
+
+void DynamicVariable::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+  interpreter.set_dynamic_value(symbol_value(), value);
+}
+
+std::shared_ptr<Value> ConstantVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  return interpreter.top_level_context()->lookup_dynamic_value(symbol_value());
 }
 
 Macro::Macro (const std::string& name, const std::shared_ptr<Value>& definition) : NamedValue(name) {
@@ -723,16 +752,28 @@ void Invocation::define (const std::shared_ptr<std::string>& symbol_value, const
   values_[symbol_value] = value;
 }
 
-std::shared_ptr<Value> Invocation::lookup (const std::shared_ptr<std::string>& symbol_value) const {
+std::shared_ptr<Value> Invocation::lookup_lexical_value (const std::shared_ptr<std::string>& symbol_value) const {
   auto pair = values_.find(symbol_value);
   if (pair != values_.end()) return pair->second;
-  return parent_ ? parent_->lookup(symbol_value) : Interpreter::nil();
+  return parent_ ? parent_->lookup_lexical_value(symbol_value) : Interpreter::nil();
 }
 
-void Invocation::set (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
+void Invocation::set_lexical_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
   auto pair = values_.find(symbol_value);
   if (pair != values_.end()) pair->second = value;
-  else if (parent_) parent_->set(symbol_value, value);
+  else if (parent_) parent_->set_lexical_value(symbol_value, value);
+}
+
+std::shared_ptr<Value> Invocation::lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const {
+  auto pair = values_.find(symbol_value);
+  return pair == values_.end() ? nullptr : pair->second;
+}
+
+bool Invocation::set_dynamic_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {
+  auto pair = values_.find(symbol_value);
+  if (pair == values_.end()) return false;
+  pair->second = value;
+  return true;
 }
 
 }

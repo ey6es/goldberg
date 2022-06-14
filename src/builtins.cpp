@@ -133,6 +133,133 @@ bindings Interpreter::create_static_bindings () {
       return arg->evaluate_commas(interpreter, arg);
     });
 
+  define_expand_operator(
+    ctx, "defconstant",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
+
+      return std::make_shared<Pair>(
+        self,
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_context()->define(symbol_value, new_value);
+
+      return symbol;
+    });
+
+  define_expand_operator(
+    ctx, "defparameter",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
+
+      return std::make_shared<Pair>(
+        self,
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_context()->define(symbol_value, new_value);
+
+      return symbol;
+    });
+
+  define_expand_operator(
+    ctx, "defvar",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+
+      auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
+      auto new_value_pair = Interpreter::nil();
+      if (value_pair) {
+        auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
+        value_pair->right()->require_nil();
+        new_value_pair = std::make_shared<Pair>(new_value, Interpreter::nil());
+
+      } else symbol_pair->right()->require_nil();
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
+
+      return std::make_shared<Pair>(self, std::make_shared<Pair>(symbol, new_value_pair), pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+
+      auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
+      auto new_value = Interpreter::nil();
+      if (value_pair) {
+        new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+        value_pair->right()->require_nil();
+      }
+
+      if (!interpreter.top_level_context()->is_defined(symbol_value)) {
+        interpreter.top_level_context()->define(symbol_value, new_value);
+      }
+
+      return symbol;
+    });
+
+  define_expand_operator(
+    ctx, "defun",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto new_value = std::make_shared<LambdaDefinition>(*symbol_value, interpreter, symbol_pair->right());
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
+
+      return std::make_shared<Pair>(
+        self,
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_context()->define(symbol_value, new_value);
+
+      return symbol;
+    });
+
   define_expander(
     ctx, "lambda",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
@@ -185,7 +312,7 @@ bindings Interpreter::create_static_bindings () {
       next = next_pair->right();
       next_pair = next->require_pair(next);
       last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
-      variable->set(interpreter, last_result, *args->loc());
+      variable->set_value(interpreter, last_result, *args->loc());
       next = next_pair->right();
     }
     return last_result;

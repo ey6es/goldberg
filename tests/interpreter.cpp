@@ -200,3 +200,22 @@ TEST_CASE("lambda expressions can be evaluated", "[lambda]") {
 
   REQUIRE(interpreter.evaluate("((lambda (a) (setq a 2) (+ a 1)) (* 3 3))")->to_string() == "3");
 }
+
+TEST_CASE("interpreter environment can be manipulated", "[environment]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(defparameter a (+ 1 1))")->to_string() == "a");
+  REQUIRE(interpreter.evaluate("(defparameter b (+ a 1))")->to_string() == "b");
+  REQUIRE(interpreter.evaluate("(+ a b)")->to_string() == "5");
+
+  REQUIRE(interpreter.evaluate("(defvar a 100)")->to_string() == "a");
+  REQUIRE(interpreter.evaluate("a")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(defvar c 100)")->to_string() == "c");
+  REQUIRE(interpreter.evaluate("c")->to_string() == "100");
+
+  REQUIRE(interpreter.evaluate("(defconstant d 10)")->to_string() == "d");
+  REQUIRE(interpreter.evaluate("(+ d 10)")->to_string() == "20");
+
+  REQUIRE(interpreter.evaluate("(defun do_something () (+ a c d))")->to_string() == "do_something");
+  REQUIRE(interpreter.evaluate("(do_something)")->to_string() == "112");
+}

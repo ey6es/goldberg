@@ -14,7 +14,6 @@ class Invocation;
 class Value;
 struct lexeme;
 struct location;
-struct stack_frame;
 
 typedef std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> bindings;
 
@@ -28,7 +27,7 @@ public:
 
   Interpreter ();
 
-  const std::shared_ptr<Invocation>& current_context () const;
+  const std::shared_ptr<Invocation>& current_context () const { return call_stack_.back(); }
 
   std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
 
@@ -42,6 +41,8 @@ private:
   friend class Symbol;
   friend class LambdaDefinition;
   friend class LambdaFunction;
+  friend class DynamicVariable;
+  friend class ConstantVariable;
   friend struct parameters;
 
   static std::shared_ptr<Value> t_;
@@ -65,17 +66,21 @@ private:
   void push_bindings (bindings&& ctx) { binding_stack_.push_back(ctx); }
   void pop_bindings () { binding_stack_.pop_back(); }
 
-  std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
+  bindings& top_level_bindings () { return binding_stack_.front(); }
 
-  void push_frame (const std::shared_ptr<Invocation>& context);
+  std::shared_ptr<Value> lookup_binding (const std::shared_ptr<std::string>& symbol_value) const;
+
+  void push_frame (const std::shared_ptr<Invocation>& ctx) { call_stack_.push_back(ctx); }
   void pop_frame () { call_stack_.pop_back(); }
 
+  const std::shared_ptr<Invocation>& top_level_context () const { return call_stack_.front(); }
+
+  std::shared_ptr<Value> lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const;
+  void set_dynamic_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) const;
+
   std::unordered_map<std::string, std::weak_ptr<std::string>> symbol_values_;
-
   std::vector<bindings> binding_stack_;
-
-  std::vector<stack_frame> call_stack_;
-
+  std::vector<std::shared_ptr<Invocation>> call_stack_;
   std::unordered_map<std::string, std::shared_ptr<Value>> required_files_;
 };
 
@@ -93,6 +98,7 @@ public:
   bool operator! () const { return is_nil(); }
 
   virtual bool is_nil () const { return false; }
+  virtual bool is_variable () const { return false; }
 
   virtual std::shared_ptr<std::string> as_symbol () const { return nullptr; }
   virtual std::shared_ptr<Pair> as_pair (const std::shared_ptr<Value>& self) const { return nullptr; }
@@ -125,7 +131,7 @@ public:
 
   virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
 
-  virtual void set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
+  virtual void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
 
 private:
 
@@ -379,18 +385,49 @@ private:
 class Variable : public Value {
 public:
 
-  explicit Variable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+  Variable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc)
     : Value(loc), symbol_value_(symbol_value) {}
 
+  const std::shared_ptr<std::string>& symbol_value () const { return symbol_value_; }
+
+  bool is_variable () const override { return true; }
+
   std::string to_string () const override { return *symbol_value_; }
-
-  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
-
-  void set (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
 
 private:
 
   std::shared_ptr<std::string> symbol_value_;
+};
+
+class LexicalVariable : public Variable {
+public:
+
+  explicit LexicalVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+    : Variable(symbol_value, loc) {}
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+  void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
+};
+
+class DynamicVariable : public Variable {
+public:
+
+  explicit DynamicVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+    : Variable(symbol_value, loc) {}
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+  void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
+};
+
+class ConstantVariable : public Variable {
+public:
+
+  explicit ConstantVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+    : Variable(symbol_value, loc) {}
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 };
 
 class Macro : public NamedValue {
@@ -410,22 +447,18 @@ public:
   Invocation (const std::shared_ptr<Invocation>& parent = nullptr) : parent_(parent) {}
 
   bool is_defined (const std::shared_ptr<std::string>& symbol_value) const { return values_.count(symbol_value) > 0; }
-
   void define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 
-  std::shared_ptr<Value> lookup (const std::shared_ptr<std::string>& symbol_value) const;
+  std::shared_ptr<Value> lookup_lexical_value (const std::shared_ptr<std::string>& symbol_value) const;
+  void set_lexical_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 
-  void set (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
+  std::shared_ptr<Value> lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const;
+  bool set_dynamic_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value);
 
 private:
 
   std::shared_ptr<Invocation> parent_;
   std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> values_;
-};
-
-struct stack_frame {
-  std::shared_ptr<Invocation> context;
-  std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> dynamic_vars;
 };
 
 struct location {

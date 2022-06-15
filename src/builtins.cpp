@@ -103,8 +103,8 @@ std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list,
 
 }
 
-bindings Interpreter::create_static_bindings () {
-  bindings ctx;
+bool Interpreter::populate_static_bindings () {
+  auto& ctx = static_bindings_;
 
   define(ctx, "nil", nil_);
   define(ctx, "t", t_);
@@ -571,7 +571,20 @@ bindings Interpreter::create_static_bindings () {
     return first;
   });
 
-  return ctx;
+  class StaticInterpreter : public Interpreter {
+  protected:
+
+    std::shared_ptr<std::string> get_symbol_value (const std::string& name) override {
+      return Interpreter::static_symbol_value(name);
+    }
+  } static_interpreter;
+
+  auto define_macro = [&](const std::string& name, const std::string& definition) {
+    auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
+    define(ctx, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
+  };
+
+  return true;
 }
 
 }

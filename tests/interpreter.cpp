@@ -5,32 +5,33 @@
 TEST_CASE("expressions can be parsed", "[parse]") {
   goldberg::Interpreter interpreter;
 
-  REQUIRE(interpreter.evaluate("")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("  \n  \n  \n")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("\n; Comment test\n\n")->to_string() == "nil");
+  REQUIRE(interpreter.parse("")->to_string() == "nil");
+  REQUIRE(interpreter.parse("  \n  \n  \n")->to_string() == "nil");
+  REQUIRE(interpreter.parse("\n; Comment test\n\n")->to_string() == "nil");
 
-  REQUIRE(interpreter.evaluate("\"test\"")->to_string() == "\"test\"");
-  REQUIRE(interpreter.evaluate("\"test\\\"quotes\\\"\"")->to_string() == "\"test\\\"quotes\\\"\"");
-  REQUIRE(interpreter.evaluate("\"test\\nnewline\"")->to_string() == "\"test\\nnewline\"");
-  REQUIRE(interpreter.evaluate("\"test \\\n    continuation\"")->to_string() == "\"test continuation\"");
+  REQUIRE(interpreter.parse("\"test\"")->to_string() == "\"test\"");
+  REQUIRE(interpreter.parse("\"test\\\"quotes\\\"\"")->to_string() == "\"test\\\"quotes\\\"\"");
+  REQUIRE(interpreter.parse("\"test\\nnewline\"")->to_string() == "\"test\\nnewline\"");
+  REQUIRE(interpreter.parse("\"test \\\n    continuation\"")->to_string() == "\"test continuation\"");
 
-  REQUIRE(interpreter.evaluate("0")->to_string() == "0");
-  REQUIRE(interpreter.evaluate("+0.0")->to_string() == "0");
-  REQUIRE(interpreter.evaluate("-1.5")->to_string() == "-1.5");
-  REQUIRE(interpreter.evaluate(".25")->to_string() == "0.25");
+  REQUIRE(interpreter.parse("0")->to_string() == "0");
+  REQUIRE(interpreter.parse("+0.0")->to_string() == "0");
+  REQUIRE(interpreter.parse("-1.5")->to_string() == "-1.5");
+  REQUIRE(interpreter.parse(".25")->to_string() == "0.25");
 
-  REQUIRE(interpreter.evaluate("()")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("'()")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("nil")->to_string() == "nil");
-
-  REQUIRE(interpreter.evaluate("t")->to_string() == "t");
-
-  REQUIRE(interpreter.evaluate("'foobar")->to_string() == "foobar");
-  REQUIRE(interpreter.evaluate("'(foo 1.25 \"bar\" (baz))")->to_string() == "(foo 1.25 \"bar\" (baz))");
+  REQUIRE(interpreter.parse("()")->to_string() == "nil");
+  REQUIRE(interpreter.parse("'()")->to_string() == "(quote nil)");
+  REQUIRE(interpreter.parse("foobar")->to_string() == "foobar");
 }
 
 TEST_CASE("basic expressions can be evaluated", "[basic]") {
   goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("nil")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("t")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("'foobar")->to_string() == "foobar");
+  REQUIRE(interpreter.evaluate("'(foo 1.25 \"bar\" (baz))")->to_string() == "(foo 1.25 \"bar\" (baz))");
 
   REQUIRE(interpreter.evaluate("`(1 2 (+ 1 2))")->to_string() == "(1 2 (+ 1 2))");
   REQUIRE(interpreter.evaluate("`(1 2 ,(+ 1 2))")->to_string() == "(1 2 3)");
@@ -222,4 +223,8 @@ TEST_CASE("interpreter environment can be manipulated", "[environment]") {
   REQUIRE(interpreter.evaluate("(defmacro test_macro () `(+ a c ,(+ d 10)))")->to_string() == "test_macro");
   REQUIRE(interpreter.evaluate("(test_macro)")->to_string() == "122");
   REQUIRE(interpreter.evaluate("((lambda (a) (test_macro)) 100)")->to_string() == "220");
+}
+
+TEST_CASE("built-in macros can be called", "[macros]") {
+  goldberg::Interpreter interpreter;
 }

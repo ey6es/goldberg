@@ -23,18 +23,27 @@ public:
   static const std::shared_ptr<Value>& t () { return t_; }
   static const std::shared_ptr<Value>& nil () { return nil_; }
 
-  static std::shared_ptr<std::string> static_symbol_value (const std::string& value);
+  static std::shared_ptr<std::string> static_symbol_value (const std::string& name);
 
   Interpreter ();
+  virtual ~Interpreter () {}
 
   const std::shared_ptr<Invocation>& current_context () const { return call_stack_.back(); }
 
-  std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
-
   std::shared_ptr<Value> require (const std::string& filename);
-
   std::shared_ptr<Value> load (const std::string& filename);
-  std::shared_ptr<Value> load (std::istream& in, const std::string& filename);
+
+  std::shared_ptr<Value> parse (const std::string& string, const std::string& filename = "<string>");
+  std::shared_ptr<Value> parse (std::istream& in, const std::string& filename);
+
+  std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
+  std::shared_ptr<Value> evaluate (std::istream& in, const std::string& filename);
+
+protected:
+
+  static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
+
+  virtual std::shared_ptr<std::string> get_symbol_value (const std::string& name);
 
 private:
 
@@ -42,26 +51,20 @@ private:
   friend class LambdaDefinition;
   friend class LambdaFunction;
   friend class DynamicVariable;
-  friend class ConstantVariable;
-  friend struct parameters;
 
   static std::shared_ptr<Value> t_;
   static std::shared_ptr<Value> nil_;
 
-  static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
-
   static bindings static_bindings_;
+  static bool static_bindings_populated_;
 
-  static bindings create_static_bindings ();
+  static bool populate_static_bindings ();
 
-  static std::shared_ptr<Value> parse (const std::string& string);
-  static std::shared_ptr<Value> parse (std::istream& in, location& loc, Interpreter* interpreter = nullptr);
-  static std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token, Interpreter* interpreter);
-  static std::shared_ptr<Value> parse_rest (std::istream& in, location& loc, Interpreter* interpreter);
+  std::shared_ptr<Value> parse (std::istream& in, location& loc);
+  std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);
+  std::shared_ptr<Value> parse_rest (std::istream& in, location& loc);
 
-  static lexeme lex (std::istream& in, location& loc, Interpreter* interpreter);
-
-  static std::shared_ptr<std::string> get_symbol_value (const std::string& value, Interpreter* interpreter);
+  lexeme lex (std::istream& in, location& loc);
 
   void push_bindings (bindings&& ctx) { binding_stack_.push_back(ctx); }
   void pop_bindings () { binding_stack_.pop_back(); }
@@ -326,7 +329,17 @@ private:
   Invoke invoke_;
 };
 
-struct parameters {
+class LambdaDefinition : public NamedValue {
+public:
+
+  LambdaDefinition (const std::string& name, Interpreter& interpreter, const std::shared_ptr<Value>& args);
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+private:
+
+  friend class LambdaFunction;
+
   struct optional_parameter {
     std::shared_ptr<std::string> var;
     std::shared_ptr<Value> initform;
@@ -338,31 +351,15 @@ struct parameters {
     std::shared_ptr<Value> initform;
   };
 
-  std::vector<std::shared_ptr<std::string>> required;
-  std::vector<optional_parameter> optional;
-  std::shared_ptr<std::string> rest;
-  std::unordered_map<std::shared_ptr<std::string>, optional_parameter> key;
-  std::vector<aux_parameter> aux;
+  std::shared_ptr<Value> invoke_lambda (
+    Interpreter& interpreter, const std::shared_ptr<Invocation>& parent_context, const std::shared_ptr<Value>& args) const;
 
-  void init (const std::shared_ptr<Value>& spec, Interpreter* interpreter = nullptr);
+  std::vector<std::shared_ptr<std::string>> required_params_;
+  std::vector<optional_parameter> optional_params_;
+  std::shared_ptr<std::string> rest_param_;
+  std::unordered_map<std::shared_ptr<std::string>, optional_parameter> key_params_;
+  std::vector<aux_parameter> aux_params_;
 
-  void bind (Interpreter& interpreter, const std::shared_ptr<Value>& args, const std::shared_ptr<Invocation>& ctx) const;
-};
-
-class LambdaDefinition : public NamedValue {
-public:
-
-  LambdaDefinition (const std::string& name, Interpreter& interpreter, const std::shared_ptr<Value>& args);
-
-  const parameters& params () const { return params_; }
-
-  const std::shared_ptr<Value>& body () const { return body_; }
-
-  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
-
-private:
-
-  parameters params_;
   std::shared_ptr<Value> body_;
 };
 
@@ -419,15 +416,6 @@ public:
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
   void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
-};
-
-class ConstantVariable : public Variable {
-public:
-
-  explicit ConstantVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
-    : Variable(symbol_value, loc) {}
-
-  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 };
 
 class Macro : public Value {

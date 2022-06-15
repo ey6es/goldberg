@@ -133,6 +133,7 @@ public:
   virtual std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
 
   virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
+  virtual std::shared_ptr<Value> invoke_macro (Interpreter& interpreter, const Pair& pair) const;
 
   virtual void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
 
@@ -372,6 +373,7 @@ public:
   std::string to_string () const override { return definition_->to_string(); }
 
   std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override;
+  std::shared_ptr<Value> invoke_macro (Interpreter& interpreter, const Pair& pair) const override;
 
 private:
 

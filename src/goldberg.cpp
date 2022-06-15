@@ -14,6 +14,7 @@ std::unordered_map<std::string, std::shared_ptr<std::string>> Interpreter::stati
 static auto quote_symbol = Interpreter::static_symbol_value("quote");
 static auto backquote_symbol = Interpreter::static_symbol_value("backquote");
 static auto comma_symbol = Interpreter::static_symbol_value("comma");
+static auto comma_at_symbol = Interpreter::static_symbol_value("comma-at");
 static auto aux_keyword = Interpreter::static_symbol_value("&aux");
 static auto key_keyword = Interpreter::static_symbol_value("&key");
 static auto rest_keyword = Interpreter::static_symbol_value("&rest");
@@ -120,6 +121,13 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
       auto token_loc = std::make_shared<location>(token.loc);
       return std::make_shared<Pair>(
         std::make_shared<Symbol>(comma_symbol, token_loc),
+        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
+        token_loc);
+    }
+    case '@': {
+      auto token_loc = std::make_shared<location>(token.loc);
+      return std::make_shared<Pair>(
+        std::make_shared<Symbol>(comma_at_symbol, token_loc),
         std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
         token_loc);
     }
@@ -243,11 +251,19 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         }
         throw script_error("Unmatched '\"'", start);
       }
+      case ',': {
+        int next = in.get();
+        if (next == '@') {
+          lexeme token{'@', nullptr, loc};
+          loc.column += 2;
+          return token;
+        }
+        in.unget(); // fall through
+      }
       case '(':
       case ')':
       case '\'':
-      case '`':
-      case ',': {
+      case '`': {
         lexeme token{static_cast<char>(ch), nullptr, loc};
         loc.column++;
         return token;
@@ -373,6 +389,10 @@ std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const Pair& pair
   throw script_error("Expected function", *pair.loc());
 }
 
+std::shared_ptr<Value> Value::invoke_macro (Interpreter& interpreter, const Pair& pair) const {
+  return invoke(interpreter, pair);
+}
+
 void Value::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
   throw script_error("Expected variable", loc);
 }
@@ -422,8 +442,9 @@ std::shared_ptr<Value> Pair::compile_rest (Interpreter& interpreter, const std::
 }
 
 std::shared_ptr<Value> Pair::compile_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  return left_->as_symbol() == comma_symbol
-    ? std::make_shared<Pair>(left_, right_->compile(interpreter, right_), loc())
+  auto left_symbol = left_->as_symbol();
+  return left_symbol == comma_symbol || left_symbol == comma_at_symbol
+    ? std::make_shared<Pair>(left_, right_->compile_rest(interpreter, right_), loc())
     : std::make_shared<Pair>(left_->compile_commas(interpreter, left_), right_->compile_commas(interpreter, right_), loc());
 }
 
@@ -438,10 +459,36 @@ std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std:
 }
 
 std::shared_ptr<Value> Pair::evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  if (left_->as_symbol() == comma_symbol) {
+  auto left_symbol = left_->as_symbol();
+  if (left_symbol == comma_symbol) {
     auto comma_pair = right_->require_pair(right_);
     comma_pair->right()->require_nil();
     return comma_pair->left()->evaluate(interpreter, comma_pair->left());
+  }
+  auto left_pair = left_->as_pair(left_);
+  if (left_pair && left_pair->left()->as_symbol() == comma_at_symbol) {
+    auto comma_pair = left_pair->right()->require_pair(left_pair->right());
+    comma_pair->right()->require_nil();
+
+    auto splice = comma_pair->left()->evaluate(interpreter, comma_pair->left());
+    if (!*splice) return right_->evaluate_commas(interpreter, right_);
+
+    auto splice_pair = splice->as_pair(splice);
+    if (!splice_pair) return std::make_shared<Pair>(splice, right_->evaluate_commas(interpreter, right_), loc());
+
+    auto first = std::make_shared<Pair>(splice_pair->left(), Interpreter::nil(), splice_pair->loc());
+    auto last = first;
+    auto next = splice_pair->right();
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      auto new_last = std::make_shared<Pair>(next_pair->left(), Interpreter::nil(), next_pair->loc());
+      last->set_right(new_last);
+      last = new_last;
+      next = next_pair->right();
+    }
+    last->set_right(right_->evaluate_commas(interpreter, right_));
+
+    return first;
   }
   return std::make_shared<Pair>(
     left_->evaluate_commas(interpreter, left_), right_->evaluate_commas(interpreter, right_), loc());
@@ -626,7 +673,7 @@ std::shared_ptr<Value> LambdaDefinition::evaluate (Interpreter& interpreter, con
 
 std::shared_ptr<Value> LambdaDefinition::invoke_lambda (
     Interpreter& interpreter, const std::shared_ptr<Invocation>& parent_context, const std::shared_ptr<Value>& args) const {
-  auto next_arg = args->evaluate_rest(interpreter, args);
+  auto next_arg = args;
   auto ctx = std::make_shared<Invocation>(parent_context);
 
   for (auto& var : required_params_) {
@@ -706,6 +753,10 @@ std::shared_ptr<Value> LambdaDefinition::invoke_lambda (
 }
 
 std::shared_ptr<Value> LambdaFunction::invoke (Interpreter& interpreter, const Pair& pair) const {
+  return definition_->invoke_lambda(interpreter, parent_context_, pair.right()->evaluate_rest(interpreter, pair.right()));
+}
+
+std::shared_ptr<Value> LambdaFunction::invoke_macro (Interpreter& interpreter, const Pair& pair) const {
   return definition_->invoke_lambda(interpreter, parent_context_, pair.right());
 }
 
@@ -726,7 +777,7 @@ void DynamicVariable::set_value (Interpreter& interpreter, const std::shared_ptr
 }
 
 std::shared_ptr<Value> Macro::expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const {
-  auto result = function_->invoke(interpreter, pair);
+  auto result = function_->invoke_macro(interpreter, pair);
   return result->compile(interpreter, result);
 }
 

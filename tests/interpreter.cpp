@@ -35,6 +35,7 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
 
   REQUIRE(interpreter.evaluate("`(1 2 (+ 1 2))")->to_string() == "(1 2 (+ 1 2))");
   REQUIRE(interpreter.evaluate("`(1 2 ,(+ 1 2))")->to_string() == "(1 2 3)");
+  REQUIRE(interpreter.evaluate("`(,@'(-1 0) 1 2 ,(+ 1 2) ,@(list 4 5 6))")->to_string() == "(-1 0 1 2 3 4 5 6)");
 
   REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
@@ -227,4 +228,7 @@ TEST_CASE("interpreter environment can be manipulated", "[environment]") {
 
 TEST_CASE("built-in macros can be called", "[macros]") {
   goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(let () t)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(let ((a 1)) (+ a 1))")->to_string() == "2");
 }

@@ -584,6 +584,8 @@ bool Interpreter::populate_static_bindings () {
     define(ctx, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
   };
 
+  define_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
+
   return true;
 }
 

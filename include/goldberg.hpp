@@ -430,15 +430,18 @@ public:
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 };
 
-class Macro : public NamedValue {
+class Macro : public Value {
 public:
 
-  Macro (const std::string& name, const std::shared_ptr<Value>& definition);
+  Macro (const std::shared_ptr<Value>& function) : function_(function) {}
+
+  std::string to_string () const override { return function_->to_string(); }
+
+  std::shared_ptr<Value> expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const override;
 
 private:
 
-  parameters params_;
-  std::shared_ptr<Value> body_;
+  std::shared_ptr<Value> function_;
 };
 
 class Invocation {

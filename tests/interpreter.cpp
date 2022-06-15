@@ -218,4 +218,8 @@ TEST_CASE("interpreter environment can be manipulated", "[environment]") {
 
   REQUIRE(interpreter.evaluate("(defun do_something () (+ a c d))")->to_string() == "do_something");
   REQUIRE(interpreter.evaluate("(do_something)")->to_string() == "112");
+
+  REQUIRE(interpreter.evaluate("(defmacro test_macro () `(+ a c ,(+ d 10)))")->to_string() == "test_macro");
+  REQUIRE(interpreter.evaluate("(test_macro)")->to_string() == "122");
+  REQUIRE(interpreter.evaluate("((lambda (a) (test_macro)) 100)")->to_string() == "220");
 }

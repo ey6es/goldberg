@@ -110,10 +110,6 @@ bindings Interpreter::create_static_bindings () {
   define(ctx, "t", t_);
   define(ctx, "pi", std::make_shared<Number>(M_PI));
 
-  auto define_macro = [&](const std::string& name, const std::string& definition) {
-    define(ctx, name, std::make_shared<Macro>(name, parse(definition)));
-  };
-
   define_expand_operator(
     ctx, "quote",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
@@ -143,8 +139,6 @@ bindings Interpreter::create_static_bindings () {
       auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
-
       return std::make_shared<Pair>(
         self,
         std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
@@ -158,7 +152,7 @@ bindings Interpreter::create_static_bindings () {
       auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_context()->define(symbol_value, new_value);
+      interpreter.top_level_bindings()[symbol_value] = new_value;
 
       return symbol;
     });
@@ -240,7 +234,31 @@ bindings Interpreter::create_static_bindings () {
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
       auto new_value = std::make_shared<LambdaDefinition>(*symbol_value, interpreter, symbol_pair->right());
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
+      return std::make_shared<Pair>(
+        self,
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_bindings()[symbol_value] = new_value;
+
+      return symbol;
+    });
+
+  define_expand_operator(
+    ctx, "defmacro",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto new_value = std::make_shared<LambdaDefinition>(*symbol_value, interpreter, symbol_pair->right());
 
       return std::make_shared<Pair>(
         self,
@@ -255,7 +273,7 @@ bindings Interpreter::create_static_bindings () {
       auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_context()->define(symbol_value, new_value);
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<Macro>(new_value);
 
       return symbol;
     });

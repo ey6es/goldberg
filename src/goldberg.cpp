@@ -742,10 +742,9 @@ std::shared_ptr<Value> ConstantVariable::evaluate (Interpreter& interpreter, con
   return interpreter.top_level_context()->lookup_dynamic_value(symbol_value());
 }
 
-Macro::Macro (const std::string& name, const std::shared_ptr<Value>& definition) : NamedValue(name) {
-  auto definition_pair = definition->require_pair(definition);
-  params_.init(definition_pair->left());
-  body_ = definition_pair->right();
+std::shared_ptr<Value> Macro::expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const {
+  auto result = function_->invoke(interpreter, pair);
+  return result->compile(interpreter, result);
 }
 
 void Invocation::define (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) {

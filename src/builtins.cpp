@@ -517,17 +517,40 @@ bool Interpreter::populate_static_bindings () {
 
   auto car = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
-    return arg->require_pair(arg)->left();
+    return *arg ? arg->require_pair(arg)->left() : arg;
   };
   define_native_function(ctx, "car", car);
   define_native_function(ctx, "first", car);
 
   auto cdr = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
-    return arg->require_pair(arg)->right();
+    return *arg ? arg->require_pair(arg)->right() : arg;
   };
   define_native_function(ctx, "cdr", cdr);
   define_native_function(ctx, "rest", cdr);
+
+  define_native_function(ctx, "nth", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto number_pair = args->require_pair(args);
+    auto number = static_cast<int>(number_pair->left()->require_number(*number_pair->loc()));
+    auto list_pair = number_pair->right()->require_pair(number_pair->right());
+    auto next = list_pair->left();
+    list_pair->right()->require_nil();
+    while (number >= 0 && *next) {
+      auto next_pair = next->require_pair(next);
+      if (number-- == 0) return next_pair->left();
+      next = next_pair->right();
+    }
+    return Interpreter::nil();
+  });
+
+  define_native_function(ctx, "length", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto list_pair = args->require_pair(args);
+    auto next = list_pair->left();
+    list_pair->right()->require_nil();
+    int length = 0;
+    for (; *next; ++length) next = next->require_pair(next)->right();
+    return std::make_shared<Number>(length);
+  });
 
   define_native_function(ctx, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first = nil_;
@@ -583,6 +606,33 @@ bool Interpreter::populate_static_bindings () {
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
     define(ctx, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
   };
+
+  define_macro("second",  "((arg) `(nth 1 ,arg))");
+  define_macro("third",   "((arg) `(nth 2 ,arg))");
+  define_macro("fourth",  "((arg) `(nth 3 ,arg))");
+  define_macro("fifth",   "((arg) `(nth 4 ,arg))");
+  define_macro("sixth",   "((arg) `(nth 5 ,arg))");
+  define_macro("seventh", "((arg) `(nth 6 ,arg))");
+  define_macro("eighth",  "((arg) `(nth 7 ,arg))");
+  define_macro("ninth",   "((arg) `(nth 8 ,arg))");
+  define_macro("tenth",   "((arg) `(nth 9 ,arg))");
+
+  for (int length = 2; length <= 4; ++length) {
+    auto name = 'c' + std::string(length, 'a') + 'r';
+
+    std::string definition("((arg) `");
+    for (int i = 0; i < length; ++i) definition += "(car ";
+    definition += ",arg)" + std::string(length, ')');
+
+    for (int pattern = 0; pattern < (1 << length); ++pattern) {
+      for (int pos = 0; pos < length; ++pos) {
+        auto ch = (pattern & (1 << (length - pos - 1))) ? 'd' : 'a';
+        name[1 + pos] = ch;
+        definition[8 + pos * 5 + 2] = ch;
+      }
+      define_macro(name, definition);
+    }
+  }
 
   define_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
 

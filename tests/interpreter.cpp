@@ -165,10 +165,19 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(list 1 (+ 1 1) 3)")->to_string() == "(1 2 3)");
 
   REQUIRE(interpreter.evaluate("(car '(1 2 3))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(car nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(first '(2 . 3)")->to_string() == "2");
 
   REQUIRE(interpreter.evaluate("(cdr '(1 2 3))")->to_string() == "(2 3)");
+  REQUIRE(interpreter.evaluate("(cdr nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(rest '(2 . 3)")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(nth 0 '(1 2 3))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(nth 1 '(1 2 3))")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(nth 3 '(1 2 3))")->to_string() == "nil");
+
+  REQUIRE(interpreter.evaluate("(length nil)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(length '(1 2 3))")->to_string() == "3");
 
   REQUIRE(interpreter.evaluate("(append)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append nil nil nil)")->to_string() == "nil");
@@ -231,4 +240,19 @@ TEST_CASE("built-in macros can be called", "[macros]") {
 
   REQUIRE(interpreter.evaluate("(let () t)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(let ((a 1)) (+ a 1))")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(second '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(third '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("(fourth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "4");
+  REQUIRE(interpreter.evaluate("(fifth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "5");
+  REQUIRE(interpreter.evaluate("(sixth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "6");
+  REQUIRE(interpreter.evaluate("(seventh '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "7");
+  REQUIRE(interpreter.evaluate("(eighth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "8");
+  REQUIRE(interpreter.evaluate("(ninth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "9");
+  REQUIRE(interpreter.evaluate("(tenth '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "10");
+
+  REQUIRE(interpreter.evaluate("(cadr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(caddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("(cadddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "4");
+  REQUIRE(interpreter.evaluate("(cddddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "(5 6 7 8 9 10)");
 }

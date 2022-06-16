@@ -37,6 +37,9 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
   REQUIRE(interpreter.evaluate("`(1 2 ,(+ 1 2))")->to_string() == "(1 2 3)");
   REQUIRE(interpreter.evaluate("`(,@'(-1 0) 1 2 ,(+ 1 2) ,@(list 4 5 6))")->to_string() == "(-1 0 1 2 3 4 5 6)");
 
+  REQUIRE(interpreter.evaluate("(progn)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(progn 1 2 (+ 1 2))")->to_string() == "3");
+
   REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
 
@@ -53,6 +56,10 @@ TEST_CASE("conditional expressions can be evaluated", "[conditional]") {
   REQUIRE(interpreter.evaluate("(if t 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(if nil 1)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(if (if nil 1) 1 2)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(cond)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(cond ((= 1 2) 2) (t 3))")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("(cond ((= 1 1)) (t 3))")->to_string() == "t");
 
   REQUIRE(interpreter.evaluate("(and)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(and 1)")->to_string() == "1");
@@ -255,4 +262,12 @@ TEST_CASE("built-in macros can be called", "[macros]") {
   REQUIRE(interpreter.evaluate("(caddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "3");
   REQUIRE(interpreter.evaluate("(cadddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "4");
   REQUIRE(interpreter.evaluate("(cddddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "(5 6 7 8 9 10)");
+}
+
+TEST_CASE("random primitives can be called", "[random]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(<= 0 (random 1) 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 0 (random 1 (make-random-state)) 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 0 (random 1 (make-random-state 12345)) 1)")->to_string() == "t");
 }

@@ -11,6 +11,8 @@ std::shared_ptr<Value> Interpreter::nil_ = std::make_shared<Nil>();
 
 std::unordered_map<std::string, std::shared_ptr<std::string>> Interpreter::static_symbol_values_;
 
+std::shared_ptr<std::string> Interpreter::random_state_symbol_ = Interpreter::static_symbol_value("*random-state*");
+
 static auto quote_symbol = Interpreter::static_symbol_value("quote");
 static auto backquote_symbol = Interpreter::static_symbol_value("backquote");
 static auto comma_symbol = Interpreter::static_symbol_value("comma");
@@ -32,6 +34,8 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 Interpreter::Interpreter () {
   push_bindings({});
   push_frame(std::make_shared<Invocation>());
+
+  evaluate("(defvar *random-state* (make-random-state t))");
 }
 
 std::shared_ptr<Value> Interpreter::require (const std::string& filename) {
@@ -346,6 +350,8 @@ void Value::require_nil () const {
 }
 
 double Value::require_number (const location& loc) const {
+  auto value = as_number();
+  if (!std::isnan(value)) return value;
   throw script_error("Expected number", loc);
 }
 
@@ -363,6 +369,10 @@ std::shared_ptr<Pair> Value::require_pair (const std::shared_ptr<Value>& self) c
   auto result = as_pair(self);
   if (result) return result;
   throw script_error("Expected argument", *loc());
+}
+
+std::default_random_engine& Value::require_random_state (const location& loc) {
+  throw script_error("Expected random state", loc);
 }
 
 std::shared_ptr<Value> Value::compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {

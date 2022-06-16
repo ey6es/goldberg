@@ -1,9 +1,11 @@
 #ifndef GOLDBERG_H
 #define GOLDBERG_H
 
+#include <cmath>
 #include <exception>
 #include <istream>
 #include <memory>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,8 +43,6 @@ public:
 
 protected:
 
-  static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
-
   virtual std::shared_ptr<std::string> get_symbol_value (const std::string& name);
 
 private:
@@ -54,6 +54,10 @@ private:
 
   static std::shared_ptr<Value> t_;
   static std::shared_ptr<Value> nil_;
+
+  static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
+
+  static std::shared_ptr<std::string> random_state_symbol_;
 
   static bindings static_bindings_;
   static bool static_bindings_populated_;
@@ -103,14 +107,16 @@ public:
   virtual bool is_nil () const { return false; }
   virtual bool is_variable () const { return false; }
 
+  virtual double as_number () const { return NAN; }
   virtual std::shared_ptr<std::string> as_symbol () const { return nullptr; }
   virtual std::shared_ptr<Pair> as_pair (const std::shared_ptr<Value>& self) const { return nullptr; }
 
   void require_nil () const;
-  virtual double require_number (const location& loc) const;
+  double require_number (const location& loc) const;
   virtual std::string require_string (const location& loc) const;
   std::shared_ptr<std::string> require_symbol (const location& loc) const;
   std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
+  virtual std::default_random_engine& require_random_state (const location& loc);
 
   virtual bool equals (const std::shared_ptr<Value>& other) const { return this == other.get(); }
   virtual bool equals_true () const { return false; }
@@ -171,7 +177,7 @@ public:
 
   explicit Number (double value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
 
-  double require_number (const location& loc) const override { return value_; }
+  double as_number () const override { return value_; }
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_number(value_); }
   bool equals_number (double value) const override { return value == value_; }
@@ -432,6 +438,18 @@ public:
 private:
 
   std::shared_ptr<Value> function_;
+};
+
+class RandomState : public NamedValue {
+public:
+
+  RandomState (const std::string& name, const std::default_random_engine& engine) : NamedValue(name), engine_(engine) {}
+
+  std::default_random_engine& require_random_state (const location& loc) override { return engine_; }
+
+private:
+
+  std::default_random_engine engine_;
 };
 
 class Invocation {

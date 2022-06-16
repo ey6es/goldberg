@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <unordered_set>
@@ -141,7 +142,7 @@ bool Interpreter::populate_static_bindings () {
 
       return std::make_shared<Pair>(
         self,
-        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
         pair.loc());
     },
     [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -171,7 +172,7 @@ bool Interpreter::populate_static_bindings () {
 
       return std::make_shared<Pair>(
         self,
-        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
         pair.loc());
     },
     [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -195,11 +196,11 @@ bool Interpreter::populate_static_bindings () {
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
 
       auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
-      auto new_value_pair = Interpreter::nil();
+      auto new_value_pair = nil_;
       if (value_pair) {
         auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
         value_pair->right()->require_nil();
-        new_value_pair = std::make_shared<Pair>(new_value, Interpreter::nil());
+        new_value_pair = std::make_shared<Pair>(new_value, nil_);
 
       } else symbol_pair->right()->require_nil();
 
@@ -213,7 +214,7 @@ bool Interpreter::populate_static_bindings () {
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
 
       auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
-      auto new_value = Interpreter::nil();
+      auto new_value = nil_;
       if (value_pair) {
         new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
         value_pair->right()->require_nil();
@@ -236,7 +237,7 @@ bool Interpreter::populate_static_bindings () {
 
       return std::make_shared<Pair>(
         self,
-        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
         pair.loc());
     },
     [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -262,7 +263,7 @@ bool Interpreter::populate_static_bindings () {
 
       return std::make_shared<Pair>(
         self,
-        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, Interpreter::nil())),
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
         pair.loc());
     },
     [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -298,6 +299,26 @@ bool Interpreter::populate_static_bindings () {
       : false_expr->evaluate(interpreter, false_expr);
   });
 
+  define_operator(ctx, "cond", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto next = args;
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      auto clause_pair = next_pair->left()->require_pair(next_pair->left());
+      next = next_pair->right();
+      auto last_result = clause_pair->left()->evaluate(interpreter, clause_pair->left());
+      if (*last_result) {
+        next = clause_pair->right();
+        while (*next) {
+          next_pair = next->require_pair(next);
+          last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
+          next = next_pair->right();
+        }
+        return last_result;
+      }
+    }
+    return nil_;
+  });
+
   define_operator(ctx, "and", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto value = t_;
     auto next = args;
@@ -321,9 +342,20 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
+  define_operator(ctx, "progn", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto next = args;
+    auto last_result = nil_;
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
+      next = next_pair->right();
+    }
+    return last_result;
+  });
+
   define_operator(ctx, "setq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
-    auto last_result = Interpreter::nil();
+    auto last_result = nil_;
     while (*next) {
       auto next_pair = next->require_pair(next);
       auto variable = next_pair->left();
@@ -492,10 +524,10 @@ bool Interpreter::populate_static_bindings () {
     auto next = first_pair->right();
     while (*next) {
       auto next_pair = next->require_pair(next);
-      if (!values.insert(next_pair->left()->require_number(*next_pair->loc())).second) return Interpreter::nil();
+      if (!values.insert(next_pair->left()->require_number(*next_pair->loc())).second) return nil_;
       next = next_pair->right();
     }
-    return Interpreter::t();
+    return t_;
   });
 
   define_native_function(ctx, "min", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -540,7 +572,7 @@ bool Interpreter::populate_static_bindings () {
       if (number-- == 0) return next_pair->left();
       next = next_pair->right();
     }
-    return Interpreter::nil();
+    return nil_;
   });
 
   define_native_function(ctx, "length", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -592,6 +624,43 @@ bool Interpreter::populate_static_bindings () {
       next = next_pair->right();
     }
     return first;
+  });
+
+  define_native_function(ctx, "make-random-state", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto state = nil_;
+    if (*args) {
+      auto arg_pair = args->require_pair(args);
+      state = arg_pair->left();
+      arg_pair->right()->require_nil();
+    }
+    if (!*state) state = interpreter.lookup_dynamic_value(random_state_symbol_);
+
+    std::default_random_engine engine;
+    if (state == t_) engine = std::default_random_engine(std::chrono::system_clock::now().time_since_epoch().count());
+    else {
+      auto number = state->as_number();
+      if (!std::isnan(number)) {
+        engine = std::default_random_engine(static_cast<std::default_random_engine::result_type>(number));
+      } else {
+        engine = state->require_random_state(*state->loc());
+      }
+    }
+
+    return std::make_shared<RandomState>("RandomState", engine);
+  });
+
+  define_native_function(ctx, "random", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg_pair = args->require_pair(args);
+    auto limit = arg_pair->left()->require_number(*arg_pair->loc());
+    auto state_pair = arg_pair->right()->as_pair(arg_pair->right());
+    std::shared_ptr<Value> state;
+    if (state_pair) {
+      state = state_pair->left();
+      state_pair->right()->require_nil();
+
+    } else state = interpreter.lookup_dynamic_value(random_state_symbol_);
+
+    return std::make_shared<Number>(std::uniform_real_distribution<>(0.0, limit)(state->require_random_state(*state->loc())));
   });
 
   class StaticInterpreter : public Interpreter {

@@ -43,6 +43,10 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
   REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
 
+  REQUIRE(interpreter.evaluate("(apply + nil)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(apply + 1 1 nil)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(apply + 1 1 '(2 2))")->to_string() == "6");
+
   REQUIRE(interpreter.evaluate("(equal 1 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(equal 1 2)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(equal 1 \"1\")")->to_string() == "nil");
@@ -282,6 +286,10 @@ TEST_CASE("built-in macros can be called", "[macros]") {
   REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "3");
   REQUIRE(interpreter.evaluate("(decf *foo*)")->to_string() == "2");
+}
+
+TEST_CASE("built-in functions can be called", "[functions]") {
+  goldberg::Interpreter interpreter;
 
   REQUIRE(interpreter.evaluate("(gensym)")->to_string() == "G1");
   REQUIRE(interpreter.evaluate("(gensym \"P\")")->to_string() == "P2");

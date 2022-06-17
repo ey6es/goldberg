@@ -376,6 +376,23 @@ bool Interpreter::populate_static_bindings () {
     return compiled->evaluate(interpreter, compiled);
   });
 
+  define_native_function(ctx, "apply", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto function_pair = args->require_pair(args);
+    auto arg_pair = function_pair->right()->require_pair(function_pair->right());
+    auto first = nil_;
+    std::shared_ptr<Pair> last;
+    while (*arg_pair->right()) {
+      auto new_last = std::make_shared<Pair>(arg_pair->left(), nil_);
+      if (last) last->set_right(new_last);
+      else first = new_last;
+      last = new_last;
+      arg_pair = arg_pair->right()->require_pair(arg_pair->right());
+    }
+    if (last) last->set_right(arg_pair->left());
+    else first = arg_pair->left();
+    return function_pair->left()->invoke(interpreter, first, *function_pair->loc());
+  });
+
   define_native_function(ctx, "load", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return interpreter.load(require_1(args)->require_string(*args->loc()));
   });
@@ -768,13 +785,18 @@ bool Interpreter::populate_static_bindings () {
   define_macro("incf", "((var) `(setf ,var (1+ ,var)))");
   define_macro("decf", "((var) `(setf ,var (1- ,var)))");
 
-  define_macro("gensym",
-    "((&optional (prefix \"G\")) `(make-symbol (concatenate 'string ,prefix (write-to-string (incf *gensym-counter*)))))");
+  auto define_dynamic_variable = [&](const std::string& name) {
+    define(ctx, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
+  };
 
   auto define_function = [&](const std::string& name, const std::string& definition) {
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
     define(ctx, name, lambda_def->evaluate(static_interpreter, lambda_def));
   };
+
+  define_dynamic_variable("*gensym-counter*");
+  define_function("gensym",
+    "((&optional (prefix \"G\")) (make-symbol (concatenate 'string prefix (write-to-string (incf *gensym-counter*)))))");
 
   return true;
 }

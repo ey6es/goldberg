@@ -136,8 +136,10 @@ public:
   virtual std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
   virtual std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
 
-  virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
-  virtual std::shared_ptr<Value> invoke_macro (Interpreter& interpreter, const Pair& pair) const;
+  virtual std::shared_ptr<Value> invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
+  virtual std::shared_ptr<Value> invoke_macro (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
 
   virtual void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
 
@@ -294,8 +296,9 @@ public:
 
   Operator (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
-    return invoke_(interpreter, pair.right());
+  std::shared_ptr<Value> invoke (
+      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
+    return invoke_(interpreter, args);
   }
 
 private:
@@ -310,8 +313,9 @@ public:
   ExpandOperator (const std::string& name, const Expand& expand, const Invoke& invoke)
     : Expander<Expand>(name, expand), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
-    return invoke_(interpreter, pair.right());
+  std::shared_ptr<Value> invoke (
+      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
+    return invoke_(interpreter, args);
   }
 
 private:
@@ -325,8 +329,9 @@ public:
 
   NativeFunction (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
-    return invoke_(interpreter, pair.right()->evaluate_rest(interpreter, pair.right()));
+  std::shared_ptr<Value> invoke (
+      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
+    return invoke_(interpreter, args->evaluate_rest(interpreter, args));
   }
 
 private:
@@ -376,8 +381,10 @@ public:
 
   std::string to_string () const override { return definition_->to_string(); }
 
-  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override;
-  std::shared_ptr<Value> invoke_macro (Interpreter& interpreter, const Pair& pair) const override;
+  std::shared_ptr<Value> invoke (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
+  std::shared_ptr<Value> invoke_macro (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
 
 private:
 

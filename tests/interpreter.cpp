@@ -48,6 +48,8 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
   REQUIRE(interpreter.evaluate("(equal 1 \"1\")")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(equal '(1 2) '(1 2 3))")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(equal '(1 2 (3)) '(1 2 (3)))")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(make-symbol \"hello\")")->to_string() == "hello");
 }
 
 TEST_CASE("conditional expressions can be evaluated", "[conditional]") {
@@ -85,6 +87,9 @@ TEST_CASE("numeric expressions can be evaluated", "[numeric]") {
   REQUIRE(interpreter.evaluate("(- 1.0)")->to_string() == "-1");
   REQUIRE(interpreter.evaluate("(- 1.0 2)")->to_string() == "-1");
   REQUIRE(interpreter.evaluate("(- (+ 0.5 0.5) 1.5)")->to_string() == "-0.5");
+
+  REQUIRE(interpreter.evaluate("(1+ 1)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(1- 1)")->to_string() == "0");
 
   REQUIRE(interpreter.evaluate("(*)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(* 2.0)")->to_string() == "2");
@@ -196,6 +201,16 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
 
   REQUIRE(interpreter.evaluate("(reverse nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");
+
+  REQUIRE(interpreter.evaluate("(concatenate 'list '(1 2 3) '(4 5 6))")->to_string() == "(1 2 3 4 5 6)");
+}
+
+TEST_CASE("string expressions can be evaluated", "[string]") {
+  goldberg::Interpreter interpreter;
+
+  REQUIRE(interpreter.evaluate("(write-to-string 3.14)")->to_string() == "\"3.14\"");
+
+  REQUIRE(interpreter.evaluate("(concatenate 'string \"hello\" \"goodbye\")")->to_string() == "\"hellogoodbye\"");
 }
 
 TEST_CASE("lambda expressions can be evaluated", "[lambda]") {
@@ -262,6 +277,14 @@ TEST_CASE("built-in macros can be called", "[macros]") {
   REQUIRE(interpreter.evaluate("(caddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "3");
   REQUIRE(interpreter.evaluate("(cadddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "4");
   REQUIRE(interpreter.evaluate("(cddddr '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "(5 6 7 8 9 10)");
+
+  REQUIRE(interpreter.evaluate("(defvar *foo* 1)")->to_string() == "*foo*");
+  REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "3");
+  REQUIRE(interpreter.evaluate("(decf *foo*)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(gensym)")->to_string() == "G1");
+  REQUIRE(interpreter.evaluate("(gensym \"P\")")->to_string() == "P2");
 }
 
 TEST_CASE("random primitives can be called", "[random]") {

@@ -1,5 +1,6 @@
 #include <cctype>
 #include <fstream>
+#include <regex>
 #include <sstream>
 
 #include "goldberg.hpp"
@@ -10,8 +11,6 @@ std::shared_ptr<Value> Interpreter::t_ = std::make_shared<True>();
 std::shared_ptr<Value> Interpreter::nil_ = std::make_shared<Nil>();
 
 std::unordered_map<std::string, std::shared_ptr<std::string>> Interpreter::static_symbol_values_;
-
-std::shared_ptr<std::string> Interpreter::random_state_symbol_ = Interpreter::static_symbol_value("*random-state*");
 
 static auto quote_symbol = Interpreter::static_symbol_value("quote");
 static auto backquote_symbol = Interpreter::static_symbol_value("backquote");
@@ -35,6 +34,7 @@ Interpreter::Interpreter () {
   push_bindings({});
   push_frame(std::make_shared<Invocation>());
 
+  evaluate("(defvar *gensym-counter* 0)");
   evaluate("(defvar *random-state* (make-random-state t))");
 }
 
@@ -310,9 +310,8 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
           }
         }
         token_ended:
-        char first = value[0];
-        char second = value.length() > 1 ? value[1] : 0;
-        return first == '.' || std::isdigit(first) || (first == '+' || first == '-') && (second == '.' || std::isdigit(second))
+        static std::regex number_pattern("[+-]?(\\d*\\.?\\d+|\\d+\\.?\\d*)");
+        return std::regex_match(value, number_pattern)
           ? lexeme{0, std::make_shared<Number>(std::stod(value), std::make_shared<location>(start)), start}
           : lexeme{0, std::make_shared<Symbol>(get_symbol_value(value), std::make_shared<location>(start)), start};
       }

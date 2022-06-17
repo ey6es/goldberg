@@ -319,7 +319,7 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
-  define_operator(ctx, "and", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "and", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto value = t_;
     auto next = args;
     while (*next) {
@@ -331,7 +331,7 @@ bool Interpreter::populate_static_bindings () {
     return value;
   });
 
-  define_operator(ctx, "or", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "or", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     while (*next) {
       auto next_pair = next->require_pair(next);
@@ -342,7 +342,7 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
-  define_operator(ctx, "progn", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_operator(ctx, "progn", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     auto last_result = nil_;
     while (*next) {
@@ -353,7 +353,7 @@ bool Interpreter::populate_static_bindings () {
     return last_result;
   });
 
-  define_operator(ctx, "setq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  auto setq = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     auto last_result = nil_;
     while (*next) {
@@ -366,7 +366,9 @@ bool Interpreter::populate_static_bindings () {
       next = next_pair->right();
     }
     return last_result;
-  });
+  };
+  define_operator(ctx, "setq", setq);
+  define_operator(ctx, "setf", setq);
 
   define_native_function(ctx, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
@@ -414,6 +416,13 @@ bool Interpreter::populate_static_bindings () {
     return *rest
       ? fold_numbers(rest, initial, std::divides<double>())
       : std::make_shared<Number>(1.0 / initial);
+  });
+
+  define_native_function(ctx, "1+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(require_1_number(args) + 1);
+  });
+  define_native_function(ctx, "1-", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Number>(require_1_number(args) - 1);
   });
 
   define_native_function(ctx, "mod", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -496,7 +505,7 @@ bool Interpreter::populate_static_bindings () {
     }
   });
 
-  auto not_fn = [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  auto not_fn = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return *require_1(args) ? nil_ : t_;
   };
   define_native_function(ctx, "not", not_fn);
@@ -591,6 +600,12 @@ bool Interpreter::populate_static_bindings () {
     while (*next) {
       auto next_pair = next->require_pair(next);
       auto list_next = next_pair->left();
+      next = next_pair->right();
+      if (!*next) { // use the last as-is
+        if (last) last->set_right(list_next);
+        else first = list_next;
+        break;
+      }
       while (*list_next) {
         auto list_next_pair = list_next->require_pair(list_next);
         auto new_last = std::make_shared<Pair>(list_next_pair->left(), nil_);
@@ -599,7 +614,6 @@ bool Interpreter::populate_static_bindings () {
         last = new_last;
         list_next = list_next_pair->right();
       }
-      next = next_pair->right();
     }
     return first;
   });
@@ -626,14 +640,60 @@ bool Interpreter::populate_static_bindings () {
     return first;
   });
 
-  define_native_function(ctx, "make-random-state", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  auto string_symbol = Interpreter::static_symbol_value("string");
+  auto list_symbol = Interpreter::static_symbol_value("list");
+  define_native_function(ctx, "concatenate", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto type_pair = args->require_pair(args);
+    auto type = type_pair->left()->require_symbol(*type_pair->loc());
+    auto next = type_pair->right();
+    if (type == string_symbol) {
+      std::string value;
+      while (*next) {
+        auto next_pair = next->require_pair(next);
+        value += next_pair->left()->require_string(*next_pair->loc());
+        next = next_pair->right();
+      }
+      return std::static_pointer_cast<Value>(std::make_shared<String>(value));
+
+    } else if (type == list_symbol) {
+      auto first = nil_;
+      std::shared_ptr<Pair> last;
+      while (*next) {
+        auto next_pair = next->require_pair(next);
+        auto list_next = next_pair->left();
+        next = next_pair->right();
+
+        while (*list_next) {
+          auto list_next_pair = list_next->require_pair(list_next);
+          auto new_last = std::make_shared<Pair>(list_next_pair->left(), nil_);
+          if (last) last->set_right(new_last);
+          else first = new_last;
+          last = new_last;
+          list_next = list_next_pair->right();
+        }
+      }
+      return first;
+
+    } else throw script_error("Unknown type for concatenate \"" + *type + "\"", *type_pair->loc());
+  });
+
+  define_native_function(ctx, "write-to-string", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<String>(require_1(args)->to_string());
+  });
+
+  define_native_function(ctx, "make-symbol", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::make_shared<Symbol>(interpreter.get_symbol_value(require_1(args)->require_string(*args->loc())));
+  });
+
+  auto random_state_symbol = Interpreter::static_symbol_value("*random-state*");
+  define_native_function(ctx, "make-random-state", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto state = nil_;
     if (*args) {
       auto arg_pair = args->require_pair(args);
       state = arg_pair->left();
       arg_pair->right()->require_nil();
     }
-    if (!*state) state = interpreter.lookup_dynamic_value(random_state_symbol_);
+    if (!*state) state = interpreter.lookup_dynamic_value(random_state_symbol);
 
     std::default_random_engine engine;
     if (state == t_) engine = std::default_random_engine(std::chrono::system_clock::now().time_since_epoch().count());
@@ -649,7 +709,7 @@ bool Interpreter::populate_static_bindings () {
     return std::make_shared<RandomState>("RandomState", engine);
   });
 
-  define_native_function(ctx, "random", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  define_native_function(ctx, "random", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg_pair = args->require_pair(args);
     auto limit = arg_pair->left()->require_number(*arg_pair->loc());
     auto state_pair = arg_pair->right()->as_pair(arg_pair->right());
@@ -658,7 +718,7 @@ bool Interpreter::populate_static_bindings () {
       state = state_pair->left();
       state_pair->right()->require_nil();
 
-    } else state = interpreter.lookup_dynamic_value(random_state_symbol_);
+    } else state = interpreter.lookup_dynamic_value(random_state_symbol);
 
     return std::make_shared<Number>(std::uniform_real_distribution<>(0.0, limit)(state->require_random_state(*state->loc())));
   });
@@ -704,6 +764,17 @@ bool Interpreter::populate_static_bindings () {
   }
 
   define_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
+
+  define_macro("incf", "((var) `(setf ,var (1+ ,var)))");
+  define_macro("decf", "((var) `(setf ,var (1- ,var)))");
+
+  define_macro("gensym",
+    "((&optional (prefix \"G\")) `(make-symbol (concatenate 'string ,prefix (write-to-string (incf *gensym-counter*)))))");
+
+  auto define_function = [&](const std::string& name, const std::string& definition) {
+    auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
+    define(ctx, name, lambda_def->evaluate(static_interpreter, lambda_def));
+  };
 
   return true;
 }

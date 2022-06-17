@@ -57,8 +57,6 @@ private:
 
   static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
 
-  static std::shared_ptr<std::string> random_state_symbol_;
-
   static bindings static_bindings_;
   static bool static_bindings_populated_;
 

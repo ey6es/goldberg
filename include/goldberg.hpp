@@ -138,9 +138,8 @@ public:
   virtual std::shared_ptr<Value> evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
   virtual std::shared_ptr<Value> evaluate_commas (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
 
-  virtual std::shared_ptr<Value> invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
-  virtual std::shared_ptr<Value> invoke_macro (
+  virtual std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const;
+  virtual std::shared_ptr<Value> apply (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const;
 
   virtual void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
@@ -298,9 +297,8 @@ public:
 
   Operator (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (
-      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
-    return invoke_(interpreter, args);
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
+    return invoke_(interpreter, pair.right());
   }
 
 private:
@@ -315,9 +313,8 @@ public:
   ExpandOperator (const std::string& name, const Expand& expand, const Invoke& invoke)
     : Expander<Expand>(name, expand), invoke_(invoke) {}
 
-  std::shared_ptr<Value> invoke (
-      Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
-    return invoke_(interpreter, args);
+  std::shared_ptr<Value> invoke (Interpreter& interpreter, const Pair& pair) const override {
+    return invoke_(interpreter, pair.right());
   }
 
 private:
@@ -325,20 +322,20 @@ private:
   Invoke invoke_;
 };
 
-template<typename Invoke>
+template<typename Apply>
 class NativeFunction : public NamedValue {
 public:
 
-  NativeFunction (const std::string& name, const Invoke& invoke) : NamedValue(name), invoke_(invoke) {}
+  NativeFunction (const std::string& name, const Apply& apply) : NamedValue(name), apply_(apply) {}
 
-  std::shared_ptr<Value> invoke (
+  std::shared_ptr<Value> apply (
       Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override {
-    return invoke_(interpreter, args->evaluate_rest(interpreter, args));
+    return apply_(interpreter, args);
   }
 
 private:
 
-  Invoke invoke_;
+  Apply apply_;
 };
 
 class LambdaDefinition : public NamedValue {
@@ -363,7 +360,7 @@ private:
     std::shared_ptr<Value> initform;
   };
 
-  std::shared_ptr<Value> invoke_lambda (
+  std::shared_ptr<Value> apply_lambda (
     Interpreter& interpreter, const std::shared_ptr<Invocation>& parent_context, const std::shared_ptr<Value>& args) const;
 
   std::vector<std::shared_ptr<std::string>> required_params_;
@@ -383,9 +380,7 @@ public:
 
   std::string to_string () const override { return definition_->to_string(); }
 
-  std::shared_ptr<Value> invoke (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
-  std::shared_ptr<Value> invoke_macro (
+  std::shared_ptr<Value> apply (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
 
 private:

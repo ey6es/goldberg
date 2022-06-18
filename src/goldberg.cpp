@@ -395,13 +395,12 @@ std::shared_ptr<Value> Value::evaluate_commas (Interpreter& interpreter, const s
   return self;
 }
 
-std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  throw script_error("Expected function", loc);
+std::shared_ptr<Value> Value::invoke (Interpreter& interpreter, const Pair& pair) const {
+  return apply(interpreter, pair.right()->evaluate_rest(interpreter, pair.right()), *pair.loc());
 }
 
-std::shared_ptr<Value> Value::invoke_macro (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  return invoke(interpreter, args, loc);
+std::shared_ptr<Value> Value::apply (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
+  throw script_error("Expected function", loc);
 }
 
 void Value::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
@@ -460,7 +459,7 @@ std::shared_ptr<Value> Pair::compile_commas (Interpreter& interpreter, const std
 }
 
 std::shared_ptr<Value> Pair::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  return left_->evaluate(interpreter, left_)->invoke(interpreter, right_, *loc());
+  return left_->evaluate(interpreter, left_)->invoke(interpreter, *this);
 }
 
 std::shared_ptr<Value> Pair::evaluate_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -682,7 +681,7 @@ std::shared_ptr<Value> LambdaDefinition::evaluate (Interpreter& interpreter, con
   return std::make_shared<LambdaFunction>(std::static_pointer_cast<LambdaDefinition>(self), interpreter.current_context());
 }
 
-std::shared_ptr<Value> LambdaDefinition::invoke_lambda (
+std::shared_ptr<Value> LambdaDefinition::apply_lambda (
     Interpreter& interpreter, const std::shared_ptr<Invocation>& parent_context, const std::shared_ptr<Value>& args) const {
   auto next_arg = args;
   auto ctx = std::make_shared<Invocation>(parent_context);
@@ -763,14 +762,9 @@ std::shared_ptr<Value> LambdaDefinition::invoke_lambda (
   return last_result;
 }
 
-std::shared_ptr<Value> LambdaFunction::invoke (
+std::shared_ptr<Value> LambdaFunction::apply (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  return definition_->invoke_lambda(interpreter, parent_context_, args->evaluate_rest(interpreter, args));
-}
-
-std::shared_ptr<Value> LambdaFunction::invoke_macro (
-    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
-  return definition_->invoke_lambda(interpreter, parent_context_, args);
+  return definition_->apply_lambda(interpreter, parent_context_, args);
 }
 
 std::shared_ptr<Value> ConstantVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -799,7 +793,7 @@ void DynamicVariable::set_value (Interpreter& interpreter, const std::shared_ptr
 }
 
 std::shared_ptr<Value> Macro::expand (Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) const {
-  auto result = function_->invoke_macro(interpreter, pair.right(), *pair.loc());
+  auto result = function_->apply(interpreter, pair.right(), *pair.loc());
   return result->compile(interpreter, result);
 }
 

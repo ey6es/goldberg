@@ -211,6 +211,13 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");
 
   REQUIRE(interpreter.evaluate("(concatenate 'list '(1 2 3) '(4 5 6))")->to_string() == "(1 2 3 4 5 6)");
+
+  REQUIRE(interpreter.evaluate("(remove-if-not consp nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(remove-if-not consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
+
+  REQUIRE(interpreter.evaluate("(listp nil)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(consp nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(consp '(1 2))")->to_string() == "t");
 }
 
 TEST_CASE("string expressions can be evaluated", "[string]") {
@@ -270,6 +277,8 @@ TEST_CASE("built-in macros can be called", "[macros]") {
 
   REQUIRE(interpreter.evaluate("(let () t)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(let ((a 1)) (+ a 1))")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(let* ((a 1) (b (+ a 1))) b)")->to_string() == "2");
 
   REQUIRE(interpreter.evaluate("(second '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(third '(1 2 3 4 5 6 7 8 9 10))")->to_string() == "3");

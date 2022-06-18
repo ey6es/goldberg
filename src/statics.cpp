@@ -30,9 +30,9 @@ inline void bind_expand_operator (
   bind_value(static_bindings, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
 }
 
-template<typename Invoke>
-inline void bind_native_function (bindings& static_bindings, const std::string& name, const Invoke& invoke) {
-  bind_value(static_bindings, name, std::make_shared<NativeFunction<Invoke>>(name, invoke));
+template<typename Apply>
+inline void bind_native_function (bindings& static_bindings, const std::string& name, const Apply& apply) {
+  bind_value(static_bindings, name, std::make_shared<NativeFunction<Apply>>(name, apply));
 }
 
 inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
@@ -396,7 +396,7 @@ bool Interpreter::populate_statics () {
     }
     if (last) last->set_right(arg_pair->left());
     else first = arg_pair->left();
-    return function_pair->left()->invoke(interpreter, first, *function_pair->loc());
+    return function_pair->left()->apply(interpreter, first, *function_pair->loc());
   });
 
   bind_native_function(static_bindings_, "mapcar", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -429,7 +429,7 @@ bool Interpreter::populate_statics () {
         next_arg_pair->set_left(next_element_pair->left());
         next_arg = next_arg_pair->right();
       }
-      auto new_last_result = std::make_shared<Pair>(function->invoke(interpreter, first_arg, *function_pair->loc()), nil_);
+      auto new_last_result = std::make_shared<Pair>(function->apply(interpreter, first_arg, *function_pair->loc()), nil_);
       if (last_result) last_result->set_right(new_last_result);
       else first_result = new_last_result;
       last_result = new_last_result;
@@ -700,6 +700,39 @@ bool Interpreter::populate_statics () {
     return first;
   });
 
+  bind_native_function(static_bindings_, "remove-if-not", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto predicate_pair = args->require_pair(args);
+    auto arg_pair = std::make_shared<Pair>(nil_, nil_);
+    auto list_pair = predicate_pair->right()->require_pair(predicate_pair->right());
+    list_pair->right()->require_nil();
+
+    auto first = nil_;
+    std::shared_ptr<Pair> last;
+    auto next = list_pair->left();
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      arg_pair->set_left(next_pair->left());
+      if (*predicate_pair->left()->apply(interpreter, arg_pair, *predicate_pair->loc())) {
+        auto new_last = std::make_shared<Pair>(next_pair->left(), nil_);
+        if (last) last->set_right(new_last);
+        else first = new_last;
+        last = new_last;
+      }
+      next = next_pair->right();
+    }
+
+    return first;
+  });
+
+  bind_native_function(static_bindings_, "consp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->as_pair(arg) ? t_ : nil_;
+  });
+  bind_native_function(static_bindings_, "listp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto arg = require_1(args);
+    return arg->is_nil() || arg->as_pair(arg) ? t_ : nil_;
+  });
+
   auto string_symbol = Interpreter::static_symbol_value("string");
   auto list_symbol = Interpreter::static_symbol_value("list");
   bind_native_function(static_bindings_, "concatenate", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -824,7 +857,12 @@ bool Interpreter::populate_statics () {
     }
   }
 
-  bind_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
+  bind_macro("let", "((bindings &rest body) `((lambda (&aux ,@bindings) ,@body)))");
+  bind_macro("let*",
+    "((bindings &rest body)"
+    "  `((lambda (&aux ,@(mapcar (lambda (b) (if (consp b) (car b) b)) bindings))"
+    "    (setq ,@(apply append (remove-if-not consp bindings)))"
+    "    ,@body)))");
 
   bind_macro("incf", "((var) `(setf ,var (1+ ,var)))");
   bind_macro("decf", "((var) `(setf ,var (1- ,var)))");

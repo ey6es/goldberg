@@ -47,6 +47,10 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
   REQUIRE(interpreter.evaluate("(apply + 1 1 nil)")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(apply + 1 1 '(2 2))")->to_string() == "6");
 
+  REQUIRE(interpreter.evaluate("(mapcar - nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(mapcar - '(1 2 3))")->to_string() == "(-1 -2 -3)");
+  REQUIRE(interpreter.evaluate("(mapcar + '(1 2 3) '(1 2 3 4))")->to_string() == "(2 4 6)");
+
   REQUIRE(interpreter.evaluate("(equal 1 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(equal 1 2)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(equal 1 \"1\")")->to_string() == "nil");

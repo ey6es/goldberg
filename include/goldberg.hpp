@@ -50,6 +50,7 @@ private:
   friend class Symbol;
   friend class LambdaDefinition;
   friend class LambdaFunction;
+  friend class ConstantVariable;
   friend class DynamicVariable;
 
   static std::shared_ptr<Value> t_;
@@ -58,9 +59,10 @@ private:
   static std::unordered_map<std::string, std::shared_ptr<std::string>> static_symbol_values_;
 
   static bindings static_bindings_;
-  static bool static_bindings_populated_;
+  static std::shared_ptr<Invocation> static_context_;
+  static bool statics_populated_;
 
-  static bool populate_static_bindings ();
+  static bool populate_statics ();
 
   std::shared_ptr<Value> parse (std::istream& in, location& loc);
   std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);
@@ -407,6 +409,17 @@ public:
 private:
 
   std::shared_ptr<std::string> symbol_value_;
+};
+
+class ConstantVariable : public Variable {
+public:
+
+  explicit ConstantVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
+    : Variable(symbol_value, loc) {}
+
+  std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+  void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const override;
 };
 
 class LexicalVariable : public Variable {

@@ -10,28 +10,29 @@ namespace goldberg {
 
 namespace {
 
-inline void define (bindings& ctx, const std::string& name, const std::shared_ptr<Value>& value) {
-  ctx[Interpreter::static_symbol_value(name)] = value;
+inline void bind_value (bindings& static_bindings, const std::string& name, const std::shared_ptr<Value>& value) {
+  static_bindings[Interpreter::static_symbol_value(name)] = value;
 }
 
 template<typename Expand>
-inline void define_expander (bindings& ctx, const std::string& name, const Expand& expand) {
-  define(ctx, name, std::make_shared<Expander<Expand>>(name, expand));
+inline void bind_expander (bindings& static_bindings, const std::string& name, const Expand& expand) {
+  bind_value(static_bindings, name, std::make_shared<Expander<Expand>>(name, expand));
 }
 
 template<typename Invoke>
-inline void define_operator (bindings& ctx, const std::string& name, const Invoke& invoke) {
-  define(ctx, name, std::make_shared<Operator<Invoke>>(name, invoke));
+inline void bind_operator (bindings& static_bindings, const std::string& name, const Invoke& invoke) {
+  bind_value(static_bindings, name, std::make_shared<Operator<Invoke>>(name, invoke));
 }
 
 template<typename Expand, typename Invoke>
-inline void define_expand_operator (bindings& ctx, const std::string& name, const Expand& expand, const Invoke& invoke) {
-  define(ctx, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
+inline void bind_expand_operator (
+    bindings& static_bindings, const std::string& name, const Expand& expand, const Invoke& invoke) {
+  bind_value(static_bindings, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
 }
 
 template<typename Invoke>
-inline void define_native_function (bindings& ctx, const std::string& name, const Invoke& invoke) {
-  define(ctx, name, std::make_shared<NativeFunction<Invoke>>(name, invoke));
+inline void bind_native_function (bindings& static_bindings, const std::string& name, const Invoke& invoke) {
+  bind_value(static_bindings, name, std::make_shared<NativeFunction<Invoke>>(name, invoke));
 }
 
 inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
@@ -104,15 +105,13 @@ std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list,
 
 }
 
-bool Interpreter::populate_static_bindings () {
-  auto& ctx = static_bindings_;
+bool Interpreter::populate_statics () {
+  bind_value(static_bindings_, "nil", nil_);
+  bind_value(static_bindings_, "t", t_);
+  bind_value(static_bindings_, "pi", std::make_shared<Number>(M_PI));
 
-  define(ctx, "nil", nil_);
-  define(ctx, "t", t_);
-  define(ctx, "pi", std::make_shared<Number>(M_PI));
-
-  define_expand_operator(
-    ctx, "quote",
+  bind_expand_operator(
+    static_bindings_, "quote",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       return std::make_shared<Pair>(self, pair.right(), pair.loc());
     },
@@ -120,8 +119,8 @@ bool Interpreter::populate_static_bindings () {
       return require_1(args);
     });
 
-  define_expand_operator(
-    ctx, "backquote",
+  bind_expand_operator(
+    static_bindings_, "backquote",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       return std::make_shared<Pair>(self, pair.right()->compile_commas(interpreter, pair.right()), pair.loc());
     },
@@ -130,45 +129,18 @@ bool Interpreter::populate_static_bindings () {
       return arg->evaluate_commas(interpreter, arg);
     });
 
-  define_expand_operator(
-    ctx, "defconstant",
+  bind_expand_operator(
+    static_bindings_, "defconstant",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       auto symbol_pair = pair.right()->require_pair(pair.right());
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
       auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
+
       auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
       value_pair->right()->require_nil();
-
-      return std::make_shared<Pair>(
-        self,
-        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
-        pair.loc());
-    },
-    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-      auto symbol_pair = args->require_pair(args);
-      auto symbol = symbol_pair->left();
-      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
-      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
-      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
-      value_pair->right()->require_nil();
-
-      interpreter.top_level_bindings()[symbol_value] = new_value;
-
-      return symbol;
-    });
-
-  define_expand_operator(
-    ctx, "defparameter",
-    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
-      auto symbol_pair = pair.right()->require_pair(pair.right());
-      auto symbol = symbol_pair->left();
-      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
-      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
-      auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
-      value_pair->right()->require_nil();
-
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
 
       return std::make_shared<Pair>(
         self,
@@ -188,12 +160,45 @@ bool Interpreter::populate_static_bindings () {
       return symbol;
     });
 
-  define_expand_operator(
-    ctx, "defvar",
+  bind_expand_operator(
+    static_bindings_, "defparameter",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       auto symbol_pair = pair.right()->require_pair(pair.right());
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
+
+      auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      return std::make_shared<Pair>(
+        self,
+        std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
+        pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto symbol_pair = args->require_pair(args);
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+      auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
+      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
+      value_pair->right()->require_nil();
+
+      interpreter.top_level_context()->define(symbol_value, new_value);
+
+      return symbol;
+    });
+
+  bind_expand_operator(
+    static_bindings_, "defvar",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto symbol_pair = pair.right()->require_pair(pair.right());
+      auto symbol = symbol_pair->left();
+      auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
 
       auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
       auto new_value_pair = nil_;
@@ -203,8 +208,6 @@ bool Interpreter::populate_static_bindings () {
         new_value_pair = std::make_shared<Pair>(new_value, nil_);
 
       } else symbol_pair->right()->require_nil();
-
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
 
       return std::make_shared<Pair>(self, std::make_shared<Pair>(symbol, new_value_pair), pair.loc());
     },
@@ -227,12 +230,15 @@ bool Interpreter::populate_static_bindings () {
       return symbol;
     });
 
-  define_expand_operator(
-    ctx, "defun",
+  bind_expand_operator(
+    static_bindings_, "defun",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       auto symbol_pair = pair.right()->require_pair(pair.right());
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
+
+      interpreter.top_level_bindings()[symbol_value] = std::make_shared<LexicalVariable>(symbol_value);
+
       auto new_value = std::make_shared<LambdaDefinition>(*symbol_value, interpreter, symbol_pair->right());
 
       return std::make_shared<Pair>(
@@ -248,13 +254,13 @@ bool Interpreter::populate_static_bindings () {
       auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_bindings()[symbol_value] = new_value;
+      interpreter.top_level_context()->define(symbol_value, new_value);
 
       return symbol;
     });
 
-  define_expand_operator(
-    ctx, "defmacro",
+  bind_expand_operator(
+    static_bindings_, "defmacro",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       auto symbol_pair = pair.right()->require_pair(pair.right());
       auto symbol = symbol_pair->left();
@@ -279,13 +285,13 @@ bool Interpreter::populate_static_bindings () {
       return symbol;
     });
 
-  define_expander(
-    ctx, "lambda",
+  bind_expander(
+    static_bindings_, "lambda",
     [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
       return std::make_shared<LambdaDefinition>("lambda", interpreter, pair.right());
     });
 
-  define_operator(ctx, "if", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_operator(static_bindings_, "if", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto cond_pair = args->require_pair(args);
     auto true_pair = cond_pair->right()->require_pair(cond_pair->right());
     auto false_expr = true_pair->right();
@@ -299,7 +305,7 @@ bool Interpreter::populate_static_bindings () {
       : false_expr->evaluate(interpreter, false_expr);
   });
 
-  define_operator(ctx, "cond", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_operator(static_bindings_, "cond", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     while (*next) {
       auto next_pair = next->require_pair(next);
@@ -319,7 +325,7 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
-  define_operator(ctx, "and", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_operator(static_bindings_, "and", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto value = t_;
     auto next = args;
     while (*next) {
@@ -331,7 +337,7 @@ bool Interpreter::populate_static_bindings () {
     return value;
   });
 
-  define_operator(ctx, "or", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_operator(static_bindings_, "or", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     while (*next) {
       auto next_pair = next->require_pair(next);
@@ -342,7 +348,7 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
-  define_operator(ctx, "progn", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_operator(static_bindings_, "progn", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto next = args;
     auto last_result = nil_;
     while (*next) {
@@ -367,16 +373,16 @@ bool Interpreter::populate_static_bindings () {
     }
     return last_result;
   };
-  define_operator(ctx, "setq", setq);
-  define_operator(ctx, "setf", setq);
+  bind_operator(static_bindings_, "setq", setq);
+  bind_operator(static_bindings_, "setf", setq);
 
-  define_native_function(ctx, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
     auto compiled = arg->compile(interpreter, arg);
     return compiled->evaluate(interpreter, compiled);
   });
 
-  define_native_function(ctx, "apply", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "apply", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto function_pair = args->require_pair(args);
     auto arg_pair = function_pair->right()->require_pair(function_pair->right());
     auto first = nil_;
@@ -393,27 +399,64 @@ bool Interpreter::populate_static_bindings () {
     return function_pair->left()->invoke(interpreter, first, *function_pair->loc());
   });
 
-  define_native_function(ctx, "load", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "mapcar", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto function_pair = args->require_pair(args);
+    auto function = function_pair->left();
+    auto next_list_pair = function_pair->right()->require_pair(function_pair->right());
+
+    std::vector<std::shared_ptr<Value>> arg_lists{next_list_pair->left()};
+    auto last_arg = std::make_shared<Pair>(nil_, nil_);
+    std::shared_ptr<Value> first_arg = last_arg;
+
+    while (*next_list_pair->right()) {
+      next_list_pair = next_list_pair->right()->require_pair(next_list_pair->right());
+      arg_lists.push_back(next_list_pair->left());
+      auto new_last_arg = std::make_shared<Pair>(nil_, nil_);
+      last_arg->set_right(new_last_arg);
+      last_arg = new_last_arg;
+    }
+
+    auto first_result = nil_;
+    std::shared_ptr<Pair> last_result;
+
+    while (true) {
+      auto next_arg = first_arg;
+      for (auto& next_element : arg_lists) {
+        if (!*next_element) return first_result;
+        auto next_element_pair = next_element->require_pair(next_element);
+        next_element = next_element_pair->right();
+        auto next_arg_pair = next_arg->require_pair(next_arg);
+        next_arg_pair->set_left(next_element_pair->left());
+        next_arg = next_arg_pair->right();
+      }
+      auto new_last_result = std::make_shared<Pair>(function->invoke(interpreter, first_arg, *function_pair->loc()), nil_);
+      if (last_result) last_result->set_right(new_last_result);
+      else first_result = new_last_result;
+      last_result = new_last_result;
+    }
+  });
+
+  bind_native_function(static_bindings_, "load", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return interpreter.load(require_1(args)->require_string(*args->loc()));
   });
-  define_native_function(ctx, "require", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "require", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return interpreter.require(require_1(args)->require_string(*args->loc()));
   });
 
-  define_native_function(ctx, "eq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "eq", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2(args);
     return pair.first == pair.second ? t_ : nil_;
   });
-  define_native_function(ctx, "equal", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "equal", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2(args);
     return pair.first->equals(pair.second) ? t_ : nil_;
   });
 
-  define_native_function(ctx, "+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return fold_numbers(args, 0.0, std::plus<double>());
   });
 
-  define_native_function(ctx, "-", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "-", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     double initial = first_pair->left()->require_number(*first_pair->loc());
     auto rest = first_pair->right();
@@ -422,11 +465,11 @@ bool Interpreter::populate_static_bindings () {
       : std::make_shared<Number>(-initial);
   });
 
-  define_native_function(ctx, "*", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "*", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return fold_numbers(args, 1.0, std::multiplies<double>());
   });
 
-  define_native_function(ctx, "/", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "/", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     double initial = first_pair->left()->require_number(*first_pair->loc());
     auto rest = first_pair->right();
@@ -435,38 +478,38 @@ bool Interpreter::populate_static_bindings () {
       : std::make_shared<Number>(1.0 / initial);
   });
 
-  define_native_function(ctx, "1+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "1+", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(require_1_number(args) + 1);
   });
-  define_native_function(ctx, "1-", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "1-", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(require_1_number(args) - 1);
   });
 
-  define_native_function(ctx, "mod", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "mod", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2_numbers(args);
     return std::make_shared<Number>(pair.first - std::floor(pair.first / pair.second) * pair.second);
   });
-  define_native_function(ctx, "rem", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "rem", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2_numbers(args);
     return std::make_shared<Number>(std::fmod(pair.first, pair.second));
   });
 
-  define_native_function(ctx, "sin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "sin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::sin(require_1_number(args)));
   });
-  define_native_function(ctx, "asin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "asin", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::asin(require_1_number(args)));
   });
-  define_native_function(ctx, "cos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "cos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::cos(require_1_number(args)));
   });
-  define_native_function(ctx, "acos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "acos", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::acos(require_1_number(args)));
   });
-  define_native_function(ctx, "tan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "tan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::tan(require_1_number(args)));
   });
-  define_native_function(ctx, "atan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "atan", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     auto second_pair = first_pair->right()->as_pair(first_pair->right());
     if (second_pair) {
@@ -481,33 +524,33 @@ bool Interpreter::populate_static_bindings () {
     }
   });
 
-  define_native_function(ctx, "floor", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "floor", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::floor(require_1_number(args)));
   });
-  define_native_function(ctx, "ceiling", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "ceiling", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::ceil(require_1_number(args)));
   });
-  define_native_function(ctx, "truncate", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "truncate", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::trunc(require_1_number(args)));
   });
-  define_native_function(ctx, "round", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "round", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::round(require_1_number(args)));
   });
 
-  define_native_function(ctx, "abs", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "abs", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::abs(require_1_number(args)));
   });
-  define_native_function(ctx, "sqrt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "sqrt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::sqrt(require_1_number(args)));
   });
-  define_native_function(ctx, "exp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "exp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Number>(std::exp(require_1_number(args)));
   });
-  define_native_function(ctx, "expt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "expt", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2_numbers(args);
     return std::make_shared<Number>(std::pow(pair.first, pair.second));
   });
-  define_native_function(ctx, "log", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "log", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     auto second_pair = first_pair->right()->as_pair(first_pair->right());
     if (second_pair) {
@@ -525,26 +568,26 @@ bool Interpreter::populate_static_bindings () {
   auto not_fn = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return *require_1(args) ? nil_ : t_;
   };
-  define_native_function(ctx, "not", not_fn);
-  define_native_function(ctx, "null", not_fn);
+  bind_native_function(static_bindings_, "not", not_fn);
+  bind_native_function(static_bindings_, "null", not_fn);
 
-  define_native_function(ctx, "=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return compare_numbers(args, std::equal_to<double>());
   });
-  define_native_function(ctx, "<", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "<", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return compare_numbers(args, std::less<double>());
   });
-  define_native_function(ctx, ">", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, ">", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return compare_numbers(args, std::greater<double>());
   });
-  define_native_function(ctx, "<=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "<=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return compare_numbers(args, std::less_equal<double>());
   });
-  define_native_function(ctx, ">=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, ">=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return compare_numbers(args, std::greater_equal<double>());
   });
 
-  define_native_function(ctx, "/=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "/=", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     std::unordered_set<double> values({first_pair->left()->require_number(*first_pair->loc())});
     auto next = first_pair->right();
@@ -556,20 +599,20 @@ bool Interpreter::populate_static_bindings () {
     return t_;
   });
 
-  define_native_function(ctx, "min", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "min", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmin));
   });
 
-  define_native_function(ctx, "max", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "max", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmax));
   });
 
-  define_native_function(ctx, "cons", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "cons", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto pair = require_2(args);
     return std::make_shared<Pair>(pair.first, pair.second);
   });
 
-  define_native_function(ctx, "list", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "list", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return args;
   });
 
@@ -577,17 +620,17 @@ bool Interpreter::populate_static_bindings () {
     auto arg = require_1(args);
     return *arg ? arg->require_pair(arg)->left() : arg;
   };
-  define_native_function(ctx, "car", car);
-  define_native_function(ctx, "first", car);
+  bind_native_function(static_bindings_, "car", car);
+  bind_native_function(static_bindings_, "first", car);
 
   auto cdr = [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
     return *arg ? arg->require_pair(arg)->right() : arg;
   };
-  define_native_function(ctx, "cdr", cdr);
-  define_native_function(ctx, "rest", cdr);
+  bind_native_function(static_bindings_, "cdr", cdr);
+  bind_native_function(static_bindings_, "rest", cdr);
 
-  define_native_function(ctx, "nth", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "nth", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto number_pair = args->require_pair(args);
     auto number = static_cast<int>(number_pair->left()->require_number(*number_pair->loc()));
     auto list_pair = number_pair->right()->require_pair(number_pair->right());
@@ -601,7 +644,7 @@ bool Interpreter::populate_static_bindings () {
     return nil_;
   });
 
-  define_native_function(ctx, "length", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "length", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto list_pair = args->require_pair(args);
     auto next = list_pair->left();
     list_pair->right()->require_nil();
@@ -610,7 +653,7 @@ bool Interpreter::populate_static_bindings () {
     return std::make_shared<Number>(length);
   });
 
-  define_native_function(ctx, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first = nil_;
     std::shared_ptr<Pair> last;
     auto next = args;
@@ -635,7 +678,7 @@ bool Interpreter::populate_static_bindings () {
     return first;
   });
 
-  define_native_function(ctx, "last", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "last", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first_pair = args->require_pair(args);
     int count = 1;
     if (*first_pair->right()) {
@@ -646,7 +689,7 @@ bool Interpreter::populate_static_bindings () {
     return last(first_pair->left(), count).first;
   });
 
-  define_native_function(ctx, "reverse", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "reverse", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first = nil_;
     auto next = require_1(args);
     while (*next) {
@@ -659,7 +702,7 @@ bool Interpreter::populate_static_bindings () {
 
   auto string_symbol = Interpreter::static_symbol_value("string");
   auto list_symbol = Interpreter::static_symbol_value("list");
-  define_native_function(ctx, "concatenate", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "concatenate", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto type_pair = args->require_pair(args);
     auto type = type_pair->left()->require_symbol(*type_pair->loc());
     auto next = type_pair->right();
@@ -694,16 +737,17 @@ bool Interpreter::populate_static_bindings () {
     } else throw script_error("Unknown type for concatenate \"" + *type + "\"", *type_pair->loc());
   });
 
-  define_native_function(ctx, "write-to-string", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "write-to-string", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<String>(require_1(args)->to_string());
   });
 
-  define_native_function(ctx, "make-symbol", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "make-symbol", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Symbol>(interpreter.get_symbol_value(require_1(args)->require_string(*args->loc())));
   });
 
   auto random_state_symbol = Interpreter::static_symbol_value("*random-state*");
-  define_native_function(ctx, "make-random-state", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(
+      static_bindings_, "make-random-state", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto state = nil_;
     if (*args) {
       auto arg_pair = args->require_pair(args);
@@ -726,7 +770,7 @@ bool Interpreter::populate_static_bindings () {
     return std::make_shared<RandomState>("RandomState", engine);
   });
 
-  define_native_function(ctx, "random", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+  bind_native_function(static_bindings_, "random", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg_pair = args->require_pair(args);
     auto limit = arg_pair->left()->require_number(*arg_pair->loc());
     auto state_pair = arg_pair->right()->as_pair(arg_pair->right());
@@ -748,20 +792,20 @@ bool Interpreter::populate_static_bindings () {
     }
   } static_interpreter;
 
-  auto define_macro = [&](const std::string& name, const std::string& definition) {
+  auto bind_macro = [&](const std::string& name, const std::string& definition) {
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
-    define(ctx, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
+    bind_value(static_bindings_, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
   };
 
-  define_macro("second",  "((arg) `(nth 1 ,arg))");
-  define_macro("third",   "((arg) `(nth 2 ,arg))");
-  define_macro("fourth",  "((arg) `(nth 3 ,arg))");
-  define_macro("fifth",   "((arg) `(nth 4 ,arg))");
-  define_macro("sixth",   "((arg) `(nth 5 ,arg))");
-  define_macro("seventh", "((arg) `(nth 6 ,arg))");
-  define_macro("eighth",  "((arg) `(nth 7 ,arg))");
-  define_macro("ninth",   "((arg) `(nth 8 ,arg))");
-  define_macro("tenth",   "((arg) `(nth 9 ,arg))");
+  bind_macro("second",  "((arg) `(nth 1 ,arg))");
+  bind_macro("third",   "((arg) `(nth 2 ,arg))");
+  bind_macro("fourth",  "((arg) `(nth 3 ,arg))");
+  bind_macro("fifth",   "((arg) `(nth 4 ,arg))");
+  bind_macro("sixth",   "((arg) `(nth 5 ,arg))");
+  bind_macro("seventh", "((arg) `(nth 6 ,arg))");
+  bind_macro("eighth",  "((arg) `(nth 7 ,arg))");
+  bind_macro("ninth",   "((arg) `(nth 8 ,arg))");
+  bind_macro("tenth",   "((arg) `(nth 9 ,arg))");
 
   for (int length = 2; length <= 4; ++length) {
     auto name = 'c' + std::string(length, 'a') + 'r';
@@ -776,26 +820,28 @@ bool Interpreter::populate_static_bindings () {
         name[1 + pos] = ch;
         definition[8 + pos * 5 + 2] = ch;
       }
-      define_macro(name, definition);
+      bind_macro(name, definition);
     }
   }
 
-  define_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
+  bind_macro("let", "((&rest args) `((lambda (&aux ,@(first args)) ,@(rest args))))");
 
-  define_macro("incf", "((var) `(setf ,var (1+ ,var)))");
-  define_macro("decf", "((var) `(setf ,var (1- ,var)))");
+  bind_macro("incf", "((var) `(setf ,var (1+ ,var)))");
+  bind_macro("decf", "((var) `(setf ,var (1- ,var)))");
 
-  auto define_dynamic_variable = [&](const std::string& name) {
-    define(ctx, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
+  auto bind_dynamic_variable = [&](const std::string& name) {
+    bind_value(static_bindings_, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
   };
 
-  auto define_function = [&](const std::string& name, const std::string& definition) {
+  auto bind_function = [&](const std::string& name, const std::string& definition) {
+    auto symbol_value = Interpreter::static_symbol_value(name);
+    bind_value(static_bindings_, name, std::make_shared<LexicalVariable>(symbol_value));
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
-    define(ctx, name, lambda_def->evaluate(static_interpreter, lambda_def));
+    static_context_->define(symbol_value, lambda_def->evaluate(static_interpreter, lambda_def));
   };
 
-  define_dynamic_variable("*gensym-counter*");
-  define_function("gensym",
+  bind_dynamic_variable("*gensym-counter*");
+  bind_function("gensym",
     "((&optional (prefix \"G\")) (make-symbol (concatenate 'string prefix (write-to-string (incf *gensym-counter*)))))");
 
   return true;

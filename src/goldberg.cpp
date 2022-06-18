@@ -22,7 +22,8 @@ static auto rest_keyword = Interpreter::static_symbol_value("&rest");
 static auto optional_keyword = Interpreter::static_symbol_value("&optional");
 
 bindings Interpreter::static_bindings_;
-bool Interpreter::static_bindings_populated_ = populate_static_bindings();
+std::shared_ptr<Invocation> Interpreter::static_context_ = std::make_shared<Invocation>();
+bool Interpreter::statics_populated_ = populate_statics();
 
 std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string& name) {
   auto& pointer = static_symbol_values_[name];
@@ -32,7 +33,7 @@ std::shared_ptr<std::string> Interpreter::static_symbol_value (const std::string
 
 Interpreter::Interpreter () {
   push_bindings({});
-  push_frame(std::make_shared<Invocation>());
+  push_frame(std::make_shared<Invocation>(static_context_));
 
   evaluate("(defvar *gensym-counter* 0)");
   evaluate("(defvar *random-state* (make-random-state t))");
@@ -770,6 +771,15 @@ std::shared_ptr<Value> LambdaFunction::invoke (
 std::shared_ptr<Value> LambdaFunction::invoke_macro (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
   return definition_->invoke_lambda(interpreter, parent_context_, args);
+}
+
+std::shared_ptr<Value> ConstantVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
+  auto value = interpreter.top_level_context()->lookup_dynamic_value(symbol_value());
+  return value ? value : Interpreter::nil();
+}
+
+void ConstantVariable::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
+  throw script_error("Can't reassign constant \"" + *symbol_value() + '\"', loc);
 }
 
 std::shared_ptr<Value> LexicalVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {

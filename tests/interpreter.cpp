@@ -212,6 +212,10 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
 
   REQUIRE(interpreter.evaluate("(concatenate 'list '(1 2 3) '(4 5 6))")->to_string() == "(1 2 3 4 5 6)");
 
+  REQUIRE(interpreter.evaluate("(member 1 nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");
+  REQUIRE(interpreter.evaluate("(member 4 '(1 2 3))")->to_string() == "nil");
+
   REQUIRE(interpreter.evaluate("(remove-if-not consp nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(remove-if-not consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
 
@@ -299,6 +303,10 @@ TEST_CASE("built-in macros can be called", "[macros]") {
   REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "3");
   REQUIRE(interpreter.evaluate("(decf *foo*)")->to_string() == "2");
+
+  REQUIRE(interpreter.evaluate("(case *foo*)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(case *foo* (0 'zero) ((1 2 3) 'nonzero))")->to_string() == "nonzero");
+  REQUIRE(interpreter.evaluate("(case *foo* (0 'zero) ((4 5 6) 'nonzero) (t 6))")->to_string() == "6");
 }
 
 TEST_CASE("built-in functions can be called", "[functions]") {

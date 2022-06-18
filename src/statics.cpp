@@ -700,6 +700,21 @@ bool Interpreter::populate_statics () {
     return first;
   });
 
+  bind_native_function(static_bindings_, "member", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto item_pair = args->require_pair(args);
+    auto item = item_pair->left();
+    auto list_pair = item_pair->right()->require_pair(item_pair->right());
+    auto next = list_pair->left();
+    list_pair->right()->require_nil();
+
+    while (*next) {
+      auto next_pair = next->require_pair(next);
+      if (next_pair->left()->equals(item)) return next;
+      next = next_pair->right();
+    }
+    return nil_;
+  });
+
   bind_native_function(static_bindings_, "remove-if-not", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto predicate_pair = args->require_pair(args);
     auto arg_pair = std::make_shared<Pair>(nil_, nil_);
@@ -881,6 +896,19 @@ bool Interpreter::populate_statics () {
   bind_dynamic_variable("*gensym-counter*");
   bind_function("gensym",
     "((&optional (prefix \"G\")) (make-symbol (concatenate 'string prefix (write-to-string (incf *gensym-counter*)))))");
+
+  bind_macro("case",
+    "((keyform &rest clauses &aux (keyvar (gensym)))"
+    "  `(let ((,keyvar ,keyform)) (cond"
+    "    ,@(mapcar"
+    "        (lambda (clause) `("
+    "          ,(let ((keys (first clause))) (cond"
+    "            ((listp keys) `(member ,keyvar ',keys))"
+    "            ((or (equal keys 't) (equal keys 'otherwise)) 't)"
+    "            (t `(equal ,keyvar ',keys))))"
+    "          ,@(rest clause)"
+    "        ))"
+    "      clauses))))");
 
   return true;
 }

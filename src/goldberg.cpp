@@ -355,7 +355,7 @@ double Value::require_number (const location& loc) const {
   throw script_error("Expected number", loc);
 }
 
-std::string Value::require_string (const location& loc) const {
+const std::string& Value::require_string (const location& loc) const {
   throw script_error("Expected string", loc);
 }
 

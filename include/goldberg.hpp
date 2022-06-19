@@ -113,7 +113,7 @@ public:
 
   void require_nil () const;
   double require_number (const location& loc) const;
-  virtual std::string require_string (const location& loc) const;
+  virtual const std::string& require_string (const location& loc) const;
   std::shared_ptr<std::string> require_symbol (const location& loc) const;
   std::shared_ptr<Pair> require_pair (const std::shared_ptr<Value>& self) const;
   virtual std::default_random_engine& require_random_state (const location& loc);
@@ -127,6 +127,7 @@ public:
 
   virtual std::string to_string () const = 0;
   virtual std::string to_rest_string () const { return " . " + to_string(); }
+  virtual std::string to_raw_string () const { return to_string(); }
 
   virtual std::shared_ptr<Value> compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const { return self; }
   virtual std::shared_ptr<Value> compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const;
@@ -195,12 +196,13 @@ public:
 
   explicit String (const std::string& value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
 
-  std::string require_string (const location& loc) const override { return value_; }
+  const std::string& require_string (const location& loc) const override { return value_; }
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_string(value_); }
   bool equals_string (const std::string& value) const override { return value == value_; }
 
   std::string to_string () const override;
+  std::string to_raw_string () const override { return value_; }
 
 private:
 

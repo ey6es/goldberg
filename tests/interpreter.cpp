@@ -229,6 +229,8 @@ TEST_CASE("string expressions can be evaluated", "[string]") {
 
   REQUIRE(interpreter.evaluate("(write-to-string 3.14)")->to_string() == "\"3.14\"");
 
+  REQUIRE(interpreter.evaluate("(format nil \"~agoodbye\" \"hello\")")->to_string() == "\"hellogoodbye\"");
+
   REQUIRE(interpreter.evaluate("(concatenate 'string \"hello\" \"goodbye\")")->to_string() == "\"hellogoodbye\"");
 }
 
@@ -314,6 +316,13 @@ TEST_CASE("built-in functions can be called", "[functions]") {
 
   REQUIRE(interpreter.evaluate("(gensym)")->to_string() == "G1");
   REQUIRE(interpreter.evaluate("(gensym \"P\")")->to_string() == "P2");
+
+  REQUIRE(interpreter.evaluate("(evenp 0)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(evenp 3)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(oddp 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(oddp 3)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(member-if evenp '(1 2 3 4))")->to_string() == "(2 3 4)");
 }
 
 TEST_CASE("random primitives can be called", "[random]") {

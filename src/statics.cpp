@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <sstream>
 #include <unordered_set>
 #include <utility>
 
@@ -789,6 +790,37 @@ bool Interpreter::populate_statics () {
     return std::make_shared<String>(require_1(args)->to_string());
   });
 
+  bind_native_function(static_bindings_, "format", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto destination_pair = args->require_pair(args);
+    auto control_string_pair = destination_pair->right()->require_pair(destination_pair->right());
+    auto& control_string = control_string_pair->left()->require_string(*control_string_pair->loc());
+    auto next_arg = control_string_pair->right();
+
+    std::ostringstream out;
+    for (auto it = control_string.begin(); it != control_string.end(); ) {
+      char ch = *it++;
+      if (ch != '~') {
+        out << ch;
+        continue;
+      }
+      if (it == control_string.end()) break;
+      switch (*it++) {
+        case 'a':
+        case 'A': {
+          auto next_pair = next_arg->require_pair(next_arg);
+          out << next_pair->left()->to_raw_string();
+          next_arg = next_pair->right();
+          break;
+        }
+
+        case '~':
+          out << '~';
+          break;
+      }
+    }
+    return std::make_shared<String>(out.str());
+  });
+
   bind_native_function(static_bindings_, "make-symbol", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return std::make_shared<Symbol>(interpreter.get_symbol_value(require_1(args)->require_string(*args->loc())));
   });
@@ -886,7 +918,7 @@ bool Interpreter::populate_statics () {
     bind_value(static_bindings_, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
   };
 
-  auto bind_function = [&](const std::string& name, const std::string& definition) {
+  auto define_function = [&](const std::string& name, const std::string& definition) {
     auto symbol_value = Interpreter::static_symbol_value(name);
     bind_value(static_bindings_, name, std::make_shared<LexicalVariable>(symbol_value));
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
@@ -894,8 +926,7 @@ bool Interpreter::populate_statics () {
   };
 
   bind_dynamic_variable("*gensym-counter*");
-  bind_function("gensym",
-    "((&optional (prefix \"G\")) (make-symbol (concatenate 'string prefix (write-to-string (incf *gensym-counter*)))))");
+  define_function("gensym", "((&optional (prefix \"G\")) (make-symbol (format nil \"~a~a\" prefix (incf *gensym-counter*))))");
 
   bind_macro("case",
     "((keyform &rest clauses &aux (keyvar (gensym)))"
@@ -909,6 +940,16 @@ bool Interpreter::populate_statics () {
     "          ,@(rest clause)"
     "        ))"
     "      clauses))))");
+
+  define_function("evenp", "((v) (= (mod v 2) 0))");
+  define_function("oddp", "((v) (= (mod v 2) 1))");
+
+  define_function("member-if",
+    "((pred arg)"
+    "  (cond"
+    "    ((null arg) nil)"
+    "    ((pred (car arg)) arg)"
+    "    (t (member-if pred (cdr arg)))))");
 
   return true;
 }

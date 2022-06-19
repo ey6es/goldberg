@@ -17,7 +17,10 @@ class Value;
 struct lexeme;
 struct location;
 
-typedef std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> bindings;
+struct bindings {
+  std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> function;
+  std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> variable;
+};
 
 class Interpreter {
 public:
@@ -29,8 +32,6 @@ public:
 
   Interpreter ();
   virtual ~Interpreter () {}
-
-  const std::shared_ptr<Invocation>& current_context () const { return call_stack_.back(); }
 
   std::shared_ptr<Value> require (const std::string& filename);
   std::shared_ptr<Value> load (const std::string& filename);
@@ -49,9 +50,10 @@ protected:
 private:
 
   friend class Symbol;
+  friend class Pair;
   friend class LambdaDefinition;
-  friend class LambdaFunction;
   friend class ConstantVariable;
+  friend class LexicalVariable;
   friend class DynamicVariable;
 
   static std::shared_ptr<Value> t_;
@@ -78,12 +80,14 @@ private:
 
   bindings& top_level_bindings () { return binding_stack_.front(); }
 
-  std::shared_ptr<Value> lookup_binding (const std::shared_ptr<std::string>& symbol_value) const;
+  std::shared_ptr<Value> lookup_function_binding (const std::shared_ptr<std::string>& symbol_value) const;
+  std::shared_ptr<Value> lookup_variable_binding (const std::shared_ptr<std::string>& symbol_value) const;
 
   void push_frame (const std::shared_ptr<Invocation>& ctx) { call_stack_.push_back(ctx); }
   void pop_frame () { call_stack_.pop_back(); }
 
   const std::shared_ptr<Invocation>& top_level_context () const { return call_stack_.front(); }
+  const std::shared_ptr<Invocation>& current_context () const { return call_stack_.back(); }
 
   std::shared_ptr<Value> lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const;
   void set_dynamic_value (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<Value>& value) const;
@@ -104,10 +108,9 @@ public:
 
   const std::shared_ptr<location>& loc () const { return loc_; }
 
-  operator bool () const { return !is_nil(); }
-  bool operator! () const { return is_nil(); }
+  operator bool () const { return !equals_nil(); }
+  bool operator! () const { return equals_nil(); }
 
-  virtual bool is_nil () const { return false; }
   virtual bool is_variable () const { return false; }
 
   virtual double as_number () const { return NAN; }
@@ -122,6 +125,7 @@ public:
   virtual std::default_random_engine& require_random_state (const location& loc);
 
   virtual bool equals (const std::shared_ptr<Value>& other) const { return this == other.get(); }
+  virtual bool equals_nil () const { return false; }
   virtual bool equals_true () const { return false; }
   virtual bool equals_number (double value) const { return false; }
   virtual bool equals_string (const std::string& value) const { return false; }
@@ -169,9 +173,8 @@ public:
 
   explicit Nil (const std::shared_ptr<location>& loc = nullptr) : Value(loc) {}
 
-  bool is_nil () const override { return true; }
-
-  bool equals (const std::shared_ptr<Value>& other) const override { return other->is_nil(); }
+  bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_nil(); }
+  bool equals_nil () const override { return true; }
 
   std::string to_string () const override { return "nil"; }
   std::string to_rest_string () const override { return ""; }
@@ -226,6 +229,9 @@ public:
   std::string to_string () const override { return *value_; }
 
   std::shared_ptr<Value> compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
+
+  std::shared_ptr<Value> apply (
+    Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const override;
 
 private:
 
@@ -380,8 +386,11 @@ private:
 class LambdaFunction : public Value {
 public:
 
-  LambdaFunction (const std::shared_ptr<LambdaDefinition>& definition, const std::shared_ptr<Invocation>& parent_context)
-    : definition_(definition), parent_context_(parent_context) {}
+  LambdaFunction (
+    const std::shared_ptr<LambdaDefinition>& definition = nullptr, const std::shared_ptr<Invocation>& parent_context = nullptr)
+      : definition_(definition), parent_context_(parent_context) {}
+
+  void populate (const std::shared_ptr<LambdaDefinition>& definition, const std::shared_ptr<Invocation>& parent_context);
 
   std::string to_string () const override { return definition_->to_string(); }
 

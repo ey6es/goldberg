@@ -43,13 +43,16 @@ TEST_CASE("basic expressions can be evaluated", "[basic]") {
   REQUIRE(interpreter.evaluate("(eval 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(eval '(+ 1 2))")->to_string() == "3");
 
-  REQUIRE(interpreter.evaluate("(apply + nil)")->to_string() == "0");
-  REQUIRE(interpreter.evaluate("(apply + 1 1 nil)")->to_string() == "2");
-  REQUIRE(interpreter.evaluate("(apply + 1 1 '(2 2))")->to_string() == "6");
+  REQUIRE(interpreter.evaluate("(funcall #'(lambda () (+ 1 1)))")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(funcall #'+ 1 (* 2 3))")->to_string() == "7");
 
-  REQUIRE(interpreter.evaluate("(mapcar - nil)")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("(mapcar - '(1 2 3))")->to_string() == "(-1 -2 -3)");
-  REQUIRE(interpreter.evaluate("(mapcar + '(1 2 3) '(1 2 3 4))")->to_string() == "(2 4 6)");
+  REQUIRE(interpreter.evaluate("(apply '+ nil)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(apply '+ 1 1 nil)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(apply '+ 1 1 '(2 2))")->to_string() == "6");
+
+  REQUIRE(interpreter.evaluate("(mapcar '- nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(mapcar '- '(1 2 3))")->to_string() == "(-1 -2 -3)");
+  REQUIRE(interpreter.evaluate("(mapcar '+ '(1 2 3) '(1 2 3 4))")->to_string() == "(2 4 6)");
 
   REQUIRE(interpreter.evaluate("(equal 1 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(equal 1 2)")->to_string() == "nil");
@@ -216,8 +219,8 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");
   REQUIRE(interpreter.evaluate("(member 4 '(1 2 3))")->to_string() == "nil");
 
-  REQUIRE(interpreter.evaluate("(remove-if-not consp nil)")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("(remove-if-not consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
+  REQUIRE(interpreter.evaluate("(remove-if-not #'consp nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(remove-if-not #'consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
 
   REQUIRE(interpreter.evaluate("(listp nil)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(consp nil)")->to_string() == "nil");
@@ -322,7 +325,7 @@ TEST_CASE("built-in functions can be called", "[functions]") {
   REQUIRE(interpreter.evaluate("(oddp 0)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(oddp 3)")->to_string() == "t");
 
-  REQUIRE(interpreter.evaluate("(member-if evenp '(1 2 3 4))")->to_string() == "(2 3 4)");
+  REQUIRE(interpreter.evaluate("(member-if #'evenp '(1 2 3 4))")->to_string() == "(2 3 4)");
 }
 
 TEST_CASE("random primitives can be called", "[random]") {

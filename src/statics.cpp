@@ -11,29 +11,33 @@ namespace goldberg {
 
 namespace {
 
-inline void bind_value (bindings& static_bindings, const std::string& name, const std::shared_ptr<Value>& value) {
-  static_bindings[Interpreter::static_symbol_value(name)] = value;
+inline void bind_function (bindings& static_bindings, const std::string& name, const std::shared_ptr<Value>& value) {
+  static_bindings.function[Interpreter::static_symbol_value(name)] = value;
+}
+
+inline void bind_variable (bindings& static_bindings, const std::string& name, const std::shared_ptr<Value>& value) {
+  static_bindings.variable[Interpreter::static_symbol_value(name)] = value;
 }
 
 template<typename Expand>
 inline void bind_expander (bindings& static_bindings, const std::string& name, const Expand& expand) {
-  bind_value(static_bindings, name, std::make_shared<Expander<Expand>>(name, expand));
+  bind_function(static_bindings, name, std::make_shared<Expander<Expand>>(name, expand));
 }
 
 template<typename Invoke>
 inline void bind_operator (bindings& static_bindings, const std::string& name, const Invoke& invoke) {
-  bind_value(static_bindings, name, std::make_shared<Operator<Invoke>>(name, invoke));
+  bind_function(static_bindings, name, std::make_shared<Operator<Invoke>>(name, invoke));
 }
 
 template<typename Expand, typename Invoke>
 inline void bind_expand_operator (
     bindings& static_bindings, const std::string& name, const Expand& expand, const Invoke& invoke) {
-  bind_value(static_bindings, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
+  bind_function(static_bindings, name, std::make_shared<ExpandOperator<Expand, Invoke>>(name, expand, invoke));
 }
 
 template<typename Apply>
 inline void bind_native_function (bindings& static_bindings, const std::string& name, const Apply& apply) {
-  bind_value(static_bindings, name, std::make_shared<NativeFunction<Apply>>(name, apply));
+  bind_function(static_bindings, name, std::make_shared<NativeFunction<Apply>>(name, apply));
 }
 
 inline std::shared_ptr<Value> require_1 (const std::shared_ptr<Value>& args) {
@@ -107,9 +111,13 @@ std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list,
 }
 
 bool Interpreter::populate_statics () {
-  bind_value(static_bindings_, "nil", nil_);
-  bind_value(static_bindings_, "t", t_);
-  bind_value(static_bindings_, "pi", std::make_shared<Number>(M_PI));
+  auto define_constant_variable = [&](const std::string& name, const std::shared_ptr<Value>& value) {
+    auto symbol_value = Interpreter::static_symbol_value(name);
+    bind_variable(static_bindings_, name, std::make_shared<ConstantVariable>(symbol_value));
+    static_context_->define(symbol_value, value);
+  };
+
+  define_constant_variable("pi", std::make_shared<Number>(M_PI));
 
   bind_expand_operator(
     static_bindings_, "quote",
@@ -138,7 +146,7 @@ bool Interpreter::populate_statics () {
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
       auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
+      interpreter.top_level_bindings().variable[symbol_value] = std::make_shared<ConstantVariable>(symbol_value);
 
       auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
       value_pair->right()->require_nil();
@@ -169,7 +177,7 @@ bool Interpreter::populate_statics () {
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
       auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
+      interpreter.top_level_bindings().variable[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
 
       auto new_value = value_pair->left()->compile(interpreter, value_pair->left());
       value_pair->right()->require_nil();
@@ -199,7 +207,7 @@ bool Interpreter::populate_statics () {
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
+      interpreter.top_level_bindings().variable[symbol_value] = std::make_shared<DynamicVariable>(symbol_value);
 
       auto value_pair = symbol_pair->right()->as_pair(symbol_pair->right());
       auto new_value_pair = nil_;
@@ -238,10 +246,10 @@ bool Interpreter::populate_statics () {
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<LexicalVariable>(symbol_value);
+      // bind before populating in case the function is recursive
+      interpreter.top_level_bindings().function[symbol_value] = std::make_shared<LambdaFunction>();
 
       auto new_value = std::make_shared<LambdaDefinition>(*symbol_value, interpreter, symbol_pair->right());
-
       return std::make_shared<Pair>(
         self,
         std::make_shared<Pair>(symbol, std::make_shared<Pair>(new_value, nil_)),
@@ -252,10 +260,11 @@ bool Interpreter::populate_statics () {
       auto symbol = symbol_pair->left();
       auto symbol_value = symbol->require_symbol(*symbol_pair->loc());
       auto value_pair = symbol_pair->right()->require_pair(symbol_pair->right());
-      auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_context()->define(symbol_value, new_value);
+      auto lambda_def = std::static_pointer_cast<LambdaDefinition>(value_pair->left());
+      auto lambda_func = std::static_pointer_cast<LambdaFunction>(interpreter.top_level_bindings().function[symbol_value]);
+      lambda_func->populate(lambda_def, interpreter.current_context());
 
       return symbol;
     });
@@ -281,9 +290,19 @@ bool Interpreter::populate_statics () {
       auto new_value = value_pair->left()->evaluate(interpreter, value_pair->left());
       value_pair->right()->require_nil();
 
-      interpreter.top_level_bindings()[symbol_value] = std::make_shared<Macro>(new_value);
+      interpreter.top_level_bindings().function[symbol_value] = std::make_shared<Macro>(new_value);
 
       return symbol;
+    });
+
+  bind_expander(
+    static_bindings_, "function",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto arg = require_1(pair.right());
+      auto symbol_value = arg->as_symbol();
+      return symbol_value
+        ? interpreter.lookup_function_binding(symbol_value)
+        : arg->compile(interpreter, arg);
     });
 
   bind_expander(
@@ -296,7 +315,7 @@ bool Interpreter::populate_statics () {
     auto cond_pair = args->require_pair(args);
     auto true_pair = cond_pair->right()->require_pair(cond_pair->right());
     auto false_expr = true_pair->right();
-    if (!false_expr->is_nil()) {
+    if (!false_expr->equals_nil()) {
       auto false_pair = false_expr->require_pair(false_expr);
       false_expr = false_pair->left();
       false_pair->right()->require_nil();
@@ -379,6 +398,11 @@ bool Interpreter::populate_statics () {
 
   bind_native_function(static_bindings_, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return interpreter.evaluate(require_1(args));
+  });
+
+  bind_native_function(static_bindings_, "funcall", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto function_pair = args->require_pair(args);
+    return function_pair->left()->apply(interpreter, function_pair->right(), *function_pair->loc());
   });
 
   bind_native_function(static_bindings_, "apply", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -744,7 +768,7 @@ bool Interpreter::populate_statics () {
   });
   bind_native_function(static_bindings_, "listp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto arg = require_1(args);
-    return arg->is_nil() || arg->as_pair(arg) ? t_ : nil_;
+    return arg->equals_nil() || arg->as_pair(arg) ? t_ : nil_;
   });
 
   auto string_symbol = Interpreter::static_symbol_value("string");
@@ -835,7 +859,7 @@ bool Interpreter::populate_statics () {
     if (!*state) state = interpreter.lookup_dynamic_value(random_state_symbol);
 
     std::default_random_engine engine;
-    if (state == t_) engine = std::default_random_engine(std::chrono::system_clock::now().time_since_epoch().count());
+    if (state->equals_true()) engine = std::default_random_engine(std::chrono::system_clock::now().time_since_epoch().count());
     else {
       auto number = state->as_number();
       if (!std::isnan(number)) {
@@ -872,7 +896,7 @@ bool Interpreter::populate_statics () {
 
   auto bind_macro = [&](const std::string& name, const std::string& definition) {
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
-    bind_value(static_bindings_, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
+    bind_function(static_bindings_, name, std::make_shared<Macro>(lambda_def->evaluate(static_interpreter, lambda_def)));
   };
 
   bind_macro("second",  "((arg) `(nth 1 ,arg))");
@@ -906,21 +930,22 @@ bool Interpreter::populate_statics () {
   bind_macro("let*",
     "((bindings &rest body)"
     "  `((lambda (&aux ,@(mapcar (lambda (b) (if (consp b) (car b) b)) bindings))"
-    "    (setq ,@(apply append (remove-if-not consp bindings)))"
+    "    (setq ,@(apply #'append (remove-if-not #'consp bindings)))"
     "    ,@body)))");
 
   bind_macro("incf", "((var) `(setf ,var (1+ ,var)))");
   bind_macro("decf", "((var) `(setf ,var (1- ,var)))");
 
   auto bind_dynamic_variable = [&](const std::string& name) {
-    bind_value(static_bindings_, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
+    bind_variable(static_bindings_, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
   };
 
   auto define_function = [&](const std::string& name, const std::string& definition) {
-    auto symbol_value = Interpreter::static_symbol_value(name);
-    bind_value(static_bindings_, name, std::make_shared<LexicalVariable>(symbol_value));
+    // bind before populating in case the function is recursive
+    auto lambda_func = std::make_shared<LambdaFunction>();
+    bind_function(static_bindings_, name, lambda_func);
     auto lambda_def = std::make_shared<LambdaDefinition>(name, static_interpreter, static_interpreter.parse(definition));
-    static_context_->define(symbol_value, lambda_def->evaluate(static_interpreter, lambda_def));
+    lambda_func->populate(lambda_def, static_interpreter.current_context());
   };
 
   bind_dynamic_variable("*gensym-counter*");
@@ -943,11 +968,11 @@ bool Interpreter::populate_statics () {
   define_function("oddp", "((v) (= (mod v 2) 1))");
 
   define_function("member-if",
-    "((pred arg)"
+    "((predicate list)"
     "  (cond"
-    "    ((null arg) nil)"
-    "    ((pred (car arg)) arg)"
-    "    (t (member-if pred (cdr arg)))))");
+    "    ((null list) nil)"
+    "    ((funcall predicate (car list)) list)"
+    "    (t (member-if predicate (cdr list)))))");
 
   return true;
 }

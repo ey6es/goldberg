@@ -134,7 +134,7 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
     case '#': return parse_special(in, loc, token, function_symbol);
 
     default:
-      return token.value;
+      return token.value ? token.value : std::make_shared<Nil>(std::make_shared<location>(token.loc));
   }
 }
 
@@ -148,7 +148,7 @@ std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc)
       return parse(in, loc);
 
     case 0:
-      if (!*token.value) throw script_error("Unmatched '('", token.loc);
+      if (!token.value) throw script_error("Unmatched '('", token.loc);
       // fall through
 
     default: {
@@ -330,20 +330,33 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         static std::regex number_pattern("[+-]?(\\d*\\.?\\d+|\\d+\\.?\\d*)");
         return std::regex_match(value, number_pattern)
           ? lexeme{0, std::make_shared<Number>(std::stod(value), std::make_shared<location>(start)), start}
+          : value == "t"
+          ? lexeme{0, std::make_shared<True>(std::make_shared<location>(start)), start}
+          : value == "nil"
+          ? lexeme{0, std::make_shared<Nil>(std::make_shared<location>(start)), start}
           : lexeme{0, std::make_shared<Symbol>(get_symbol_value(value), std::make_shared<location>(start)), start};
       }
     }
   }
-  return {0, std::make_shared<Nil>(std::make_shared<location>(loc)), loc};
+  return {0, nullptr, loc};
 }
 
-std::shared_ptr<Value> Interpreter::lookup_binding (const std::shared_ptr<std::string>& symbol_value) const {
+std::shared_ptr<Value> Interpreter::lookup_function_binding (const std::shared_ptr<std::string>& symbol_value) const {
   for (auto it = binding_stack_.rbegin(); it != binding_stack_.rend(); ++it) {
-    auto pair = it->find(symbol_value);
-    if (pair != it->end()) return pair->second;
+    auto pair = it->function.find(symbol_value);
+    if (pair != it->function.end()) return pair->second;
   }
-  auto pair = static_bindings_.find(symbol_value);
-  return pair == static_bindings_.end() ? nullptr : pair->second;
+  auto pair = static_bindings_.function.find(symbol_value);
+  return pair == static_bindings_.function.end() ? nullptr : pair->second;
+}
+
+std::shared_ptr<Value> Interpreter::lookup_variable_binding (const std::shared_ptr<std::string>& symbol_value) const {
+  for (auto it = binding_stack_.rbegin(); it != binding_stack_.rend(); ++it) {
+    auto pair = it->variable.find(symbol_value);
+    if (pair != it->variable.end()) return pair->second;
+  }
+  auto pair = static_bindings_.variable.find(symbol_value);
+  return pair == static_bindings_.variable.end() ? nullptr : pair->second;
 }
 
 std::shared_ptr<Value> Interpreter::lookup_dynamic_value (const std::shared_ptr<std::string>& symbol_value) const {
@@ -362,7 +375,7 @@ void Interpreter::set_dynamic_value (
 }
 
 void Value::require_nil () const {
-  if (!is_nil()) throw script_error("Unexpected argument", *loc());
+  if (!equals_nil()) throw script_error("Unexpected argument", *loc());
 }
 
 double Value::require_number (const location& loc) const {
@@ -451,14 +464,23 @@ std::string String::to_string () const {
 
 std::shared_ptr<Value> Symbol::compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
   if (value_->size() > 0 && value_->front() == ':') return self;
-  auto result = interpreter.lookup_binding(value_);
+  auto result = interpreter.lookup_variable_binding(value_);
   if (result) return result;
-  throw script_error("Unknown symbol \"" + *value_ + '"', *loc());
+  throw script_error("Unknown variable \"" + *value_ + '"', *loc());
+}
+
+std::shared_ptr<Value> Symbol::apply (Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
+  auto result = interpreter.lookup_function_binding(value_);
+  if (result) return result->apply(interpreter, args, loc);
+  throw script_error("Unknown function \"" + *value_ + '"', loc);
 }
 
 std::shared_ptr<Value> Pair::compile (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  auto left = left_->compile(interpreter, left_);
-  return left->expand(interpreter, *this, left);
+  auto symbol_value = left_->as_symbol();
+  if (!symbol_value) return compile_rest(interpreter, self);
+  auto function = interpreter.lookup_function_binding(symbol_value);
+  if (function) return function->expand(interpreter, *this, function);
+  throw script_error("Unknown function \"" + *symbol_value + '"', *loc());
 }
 
 std::shared_ptr<Value> Pair::compile_rest (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
@@ -528,9 +550,8 @@ LambdaDefinition::LambdaDefinition (const std::string& name, Interpreter& interp
 
   auto add_binding = [&](const std::shared_ptr<std::string>& symbol_value) {
     // preserve existing variable bindings in case they're dynamic/constant
-    auto existing_binding = interpreter.lookup_binding(symbol_value);
-    if (!(existing_binding && existing_binding->is_variable())) {
-      ctx[symbol_value] = std::make_shared<LexicalVariable>(symbol_value);
+    if (!interpreter.lookup_variable_binding(symbol_value)) {
+      ctx.variable[symbol_value] = std::make_shared<LexicalVariable>(symbol_value);
     }
   };
 
@@ -780,18 +801,23 @@ std::shared_ptr<Value> LambdaDefinition::apply_lambda (
   return last_result;
 }
 
+void LambdaFunction::populate (
+    const std::shared_ptr<LambdaDefinition>& definition, const std::shared_ptr<Invocation>& parent_context) {
+  definition_ = definition;
+  parent_context_ = parent_context;
+}
+
 std::shared_ptr<Value> LambdaFunction::apply (
     Interpreter& interpreter, const std::shared_ptr<Value>& args, const location& loc) const {
   return definition_->apply_lambda(interpreter, parent_context_, args);
 }
 
 std::shared_ptr<Value> ConstantVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {
-  auto value = interpreter.top_level_context()->lookup_dynamic_value(symbol_value());
-  return value ? value : Interpreter::nil();
+  return interpreter.top_level_context()->lookup_lexical_value(symbol_value());
 }
 
 void ConstantVariable::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
-  throw script_error("Can't reassign constant \"" + *symbol_value() + '\"', loc);
+  throw script_error("Can't reassign constant \"" + *symbol_value() + '"', loc);
 }
 
 std::shared_ptr<Value> LexicalVariable::evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const {

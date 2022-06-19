@@ -325,25 +325,41 @@ bool Interpreter::populate_statics () {
       : false_expr->evaluate(interpreter, false_expr);
   });
 
-  bind_operator(static_bindings_, "cond", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto next = args;
-    while (*next) {
-      auto next_pair = next->require_pair(next);
-      auto clause_pair = next_pair->left()->require_pair(next_pair->left());
-      next = next_pair->right();
-      auto last_result = clause_pair->left()->evaluate(interpreter, clause_pair->left());
-      if (*last_result) {
-        next = clause_pair->right();
-        while (*next) {
-          next_pair = next->require_pair(next);
-          last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
-          next = next_pair->right();
-        }
-        return last_result;
+  bind_expand_operator(static_bindings_, "cond",
+    [](Interpreter& interpreter, const Pair& pair, const std::shared_ptr<Value>& self) {
+      auto first = nil_;
+      std::shared_ptr<Pair> last;
+      auto next = pair.right();
+      while (*next) {
+        auto next_pair = next->require_pair(next);
+        next = next_pair->right();
+        auto new_last = std::make_shared<Pair>(
+          next_pair->left()->compile_rest(interpreter, next_pair->left()), nil_, next_pair->loc());
+        if (last) last->set_right(new_last);
+        else first = new_last;
+        last = new_last;
       }
-    }
-    return nil_;
-  });
+      return std::make_shared<Pair>(self, first, pair.loc());
+    },
+    [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+      auto next = args;
+      while (*next) {
+        auto next_pair = next->require_pair(next);
+        auto clause_pair = next_pair->left()->require_pair(next_pair->left());
+        next = next_pair->right();
+        auto last_result = clause_pair->left()->evaluate(interpreter, clause_pair->left());
+        if (*last_result) {
+          next = clause_pair->right();
+          while (*next) {
+            next_pair = next->require_pair(next);
+            last_result = next_pair->left()->evaluate(interpreter, next_pair->left());
+            next = next_pair->right();
+          }
+          return last_result;
+        }
+      }
+      return nil_;
+    });
 
   bind_operator(static_bindings_, "and", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto value = t_;
@@ -971,8 +987,8 @@ bool Interpreter::populate_statics () {
     "((predicate list)"
     "  (cond"
     "    ((null list) nil)"
-    "    ((funcall predicate (car list)) list)"
-    "    (t (member-if predicate (cdr list)))))");
+    "    ((funcall predicate (first list)) list)"
+    "    (t (member-if predicate (rest list)))))");
 
   return true;
 }

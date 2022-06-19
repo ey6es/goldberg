@@ -16,6 +16,7 @@ static auto quote_symbol = Interpreter::static_symbol_value("quote");
 static auto backquote_symbol = Interpreter::static_symbol_value("backquote");
 static auto comma_symbol = Interpreter::static_symbol_value("comma");
 static auto comma_at_symbol = Interpreter::static_symbol_value("comma-at");
+static auto function_symbol = Interpreter::static_symbol_value("function");
 static auto aux_keyword = Interpreter::static_symbol_value("&aux");
 static auto key_keyword = Interpreter::static_symbol_value("&key");
 static auto rest_keyword = Interpreter::static_symbol_value("&rest");
@@ -74,12 +75,30 @@ std::shared_ptr<Value> Interpreter::evaluate (std::istream& in, const std::strin
   location loc{std::make_shared<std::string>(filename), 1, 1};
   std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
   while (in) {
-    auto parsed = parse(in, loc);
-    auto compiled = parsed->compile(*this, parsed);
-    auto result = compiled->evaluate(*this, compiled);
+    auto result = evaluate(parse(in, loc));
     if (*result) last_result = result;
   }
   return last_result;
+}
+
+std::shared_ptr<Value> Interpreter::evaluate (const std::shared_ptr<Value> value) {
+  struct global_scope {
+    Interpreter& interpreter;
+    std::vector<std::shared_ptr<Invocation>> saved_call_stack;
+
+    global_scope (Interpreter& interpreter) : interpreter(interpreter) {
+      if (interpreter.call_stack_.size() > 1) {
+        saved_call_stack.push_back(interpreter.call_stack_.front());
+        interpreter.call_stack_.swap(saved_call_stack);
+      }
+    }
+    ~global_scope () {
+      if (saved_call_stack.size() > 0) interpreter.call_stack_.swap(saved_call_stack);
+    }
+  } scope(*this);
+
+  auto compiled = value->compile(*this, value);
+  return compiled->evaluate(*this, compiled);
 }
 
 std::shared_ptr<std::string> Interpreter::get_symbol_value (const std::string& name) {
@@ -108,34 +127,12 @@ std::shared_ptr<Value> Interpreter::parse (std::istream& in, location& loc, cons
     case ')':
       throw script_error("Mismatched ')'", token.loc);
 
-    case '\'': {
-      auto token_loc = std::make_shared<location>(token.loc);
-      return std::make_shared<Pair>(
-        std::make_shared<Symbol>(quote_symbol, token_loc),
-        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
-        token_loc);
-    }
-    case '`': {
-      auto token_loc = std::make_shared<location>(token.loc);
-      return std::make_shared<Pair>(
-        std::make_shared<Symbol>(backquote_symbol, token_loc),
-        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
-        token_loc);
-    }
-    case ',': {
-      auto token_loc = std::make_shared<location>(token.loc);
-      return std::make_shared<Pair>(
-        std::make_shared<Symbol>(comma_symbol, token_loc),
-        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
-        token_loc);
-    }
-    case '@': {
-      auto token_loc = std::make_shared<location>(token.loc);
-      return std::make_shared<Pair>(
-        std::make_shared<Symbol>(comma_at_symbol, token_loc),
-        std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
-        token_loc);
-    }
+    case '\'': return parse_special(in, loc, token, quote_symbol);
+    case '`': return parse_special(in, loc, token, backquote_symbol);
+    case ',': return parse_special(in, loc, token, comma_symbol);
+    case '@': return parse_special(in, loc, token, comma_at_symbol);
+    case '#': return parse_special(in, loc, token, function_symbol);
+
     default:
       return token.value;
   }
@@ -159,6 +156,15 @@ std::shared_ptr<Value> Interpreter::parse_rest (std::istream& in, location& loc)
       return std::make_shared<Pair>(first, parse_rest(in, loc), first->loc());
     }
   }
+}
+
+std::shared_ptr<Value> Interpreter::parse_special (
+    std::istream& in, location& loc, const lexeme& token, const std::shared_ptr<std::string>& symbol_value) {
+  auto token_loc = std::make_shared<location>(token.loc);
+  return std::make_shared<Pair>(
+    std::make_shared<Symbol>(symbol_value, token_loc),
+    std::make_shared<Pair>(parse(in, loc), std::make_shared<Nil>(token_loc), token_loc),
+    token_loc);
 }
 
 lexeme Interpreter::lex (std::istream& in, location& loc) {
@@ -272,6 +278,16 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         lexeme token{static_cast<char>(ch), nullptr, loc};
         loc.column++;
         return token;
+      }
+      case '#': {
+        int next = in.get();
+        if (next == '\'') {
+          lexeme token{'#', nullptr, loc};
+          loc.column += 2;
+          return token;
+        }
+        in.unget();
+        break;
       }
       case '.': {
         int next = in.get();
@@ -669,7 +685,8 @@ LambdaDefinition::LambdaDefinition (const std::string& name, Interpreter& interp
     Interpreter& interpreter;
 
     bindings_scope (Interpreter& interpreter, bindings&& ctx) : interpreter(interpreter) {
-      interpreter.push_bindings(std::move(ctx)); }
+      interpreter.push_bindings(std::move(ctx));
+    }
     ~bindings_scope () { interpreter.pop_bindings(); }
 
   } scope(interpreter, std::move(ctx));
@@ -746,7 +763,8 @@ std::shared_ptr<Value> LambdaDefinition::apply_lambda (
     Interpreter& interpreter;
 
     frame_scope (Interpreter& interpreter, const std::shared_ptr<Invocation>& ctx) : interpreter(interpreter) {
-      interpreter.push_frame(ctx); }
+      interpreter.push_frame(ctx);
+    }
     ~frame_scope () { interpreter.pop_frame(); }
 
   } scope(interpreter, ctx);

@@ -378,9 +378,7 @@ bool Interpreter::populate_statics () {
   bind_operator(static_bindings_, "setf", setq);
 
   bind_native_function(static_bindings_, "eval", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto arg = require_1(args);
-    auto compiled = arg->compile(interpreter, arg);
-    return compiled->evaluate(interpreter, compiled);
+    return interpreter.evaluate(require_1(args));
   });
 
   bind_native_function(static_bindings_, "apply", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {

@@ -40,6 +40,7 @@ public:
 
   std::shared_ptr<Value> evaluate (const std::string& string, const std::string& filename = "<string>");
   std::shared_ptr<Value> evaluate (std::istream& in, const std::string& filename);
+  std::shared_ptr<Value> evaluate (const std::shared_ptr<Value> value);
 
 protected:
 
@@ -67,6 +68,8 @@ private:
   std::shared_ptr<Value> parse (std::istream& in, location& loc);
   std::shared_ptr<Value> parse (std::istream& in, location& loc, const lexeme& token);
   std::shared_ptr<Value> parse_rest (std::istream& in, location& loc);
+  std::shared_ptr<Value> parse_special (
+    std::istream& in, location& loc, const lexeme& token, const std::shared_ptr<std::string>& symbol_value);
 
   lexeme lex (std::istream& in, location& loc);
 

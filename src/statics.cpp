@@ -683,15 +683,6 @@ bool Interpreter::populate_statics () {
     return nil_;
   });
 
-  bind_native_function(static_bindings_, "length", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto list_pair = args->require_pair(args);
-    auto next = list_pair->left();
-    list_pair->right()->require_nil();
-    int length = 0;
-    for (; *next; ++length) next = next->require_pair(next)->right();
-    return std::make_shared<Number>(length);
-  });
-
   bind_native_function(static_bindings_, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first = nil_;
     std::shared_ptr<Pair> last;
@@ -736,45 +727,6 @@ bool Interpreter::populate_statics () {
       first = std::make_shared<Pair>(next_pair->left(), first);
       next = next_pair->right();
     }
-    return first;
-  });
-
-  bind_native_function(static_bindings_, "member", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto item_pair = args->require_pair(args);
-    auto item = item_pair->left();
-    auto list_pair = item_pair->right()->require_pair(item_pair->right());
-    auto next = list_pair->left();
-    list_pair->right()->require_nil();
-
-    while (*next) {
-      auto next_pair = next->require_pair(next);
-      if (next_pair->left()->equals(item)) return next;
-      next = next_pair->right();
-    }
-    return nil_;
-  });
-
-  bind_native_function(static_bindings_, "remove-if-not", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto predicate_pair = args->require_pair(args);
-    auto arg_pair = std::make_shared<Pair>(nil_, nil_);
-    auto list_pair = predicate_pair->right()->require_pair(predicate_pair->right());
-    list_pair->right()->require_nil();
-
-    auto first = nil_;
-    std::shared_ptr<Pair> last;
-    auto next = list_pair->left();
-    while (*next) {
-      auto next_pair = next->require_pair(next);
-      arg_pair->set_left(next_pair->left());
-      if (*predicate_pair->left()->apply(interpreter, arg_pair, *predicate_pair->loc())) {
-        auto new_last = std::make_shared<Pair>(next_pair->left(), nil_);
-        if (last) last->set_right(new_last);
-        else first = new_last;
-        last = new_last;
-      }
-      next = next_pair->right();
-    }
-
     return first;
   });
 
@@ -943,11 +895,6 @@ bool Interpreter::populate_statics () {
   }
 
   bind_macro("let", "((bindings &rest body) `((lambda (&aux ,@bindings) ,@body)))");
-  bind_macro("let*",
-    "((bindings &rest body)"
-    "  `((lambda (&aux ,@(mapcar (lambda (b) (if (consp b) (car b) b)) bindings))"
-    "    (setq ,@(apply #'append (remove-if-not #'consp bindings)))"
-    "    ,@body)))");
 
   bind_macro("incf", "((var) `(setf ,var (1+ ,var)))");
   bind_macro("decf", "((var) `(setf ,var (1- ,var)))");
@@ -980,8 +927,18 @@ bool Interpreter::populate_statics () {
     "        ))"
     "      clauses))))");
 
+  define_function("zerop", "((v) (= v 0))");
   define_function("evenp", "((v) (= (mod v 2) 0))");
   define_function("oddp", "((v) (= (mod v 2) 1))");
+
+  define_function("length", "((list) (if (null list) 0 (1+ (length (rest list)))))");
+
+  define_function("member",
+    "((item list)"
+    "  (cond"
+    "    ((null list) nil)"
+    "    ((equal item (first list)) list)"
+    "    (t (member item (rest list)))))");
 
   define_function("member-if",
     "((predicate list)"
@@ -989,6 +946,40 @@ bool Interpreter::populate_statics () {
     "    ((null list) nil)"
     "    ((funcall predicate (first list)) list)"
     "    (t (member-if predicate (rest list)))))");
+
+  define_function("member-if-not",
+    "((predicate list)"
+    "  (cond"
+    "    ((null list) nil)"
+    "    ((not (funcall predicate (first list))) list)"
+    "    (t (member-if predicate (rest list)))))");
+
+  define_function("remove",
+    "((item list)"
+    "  (cond"
+    "    ((null list) nil)"
+    "    ((equal (first list) item) (remove item (rest list)))"
+    "    (t (cons (first list) (remove item (rest list))))))");
+
+  define_function("remove-if",
+    "((predicate list)"
+    "  (cond"
+    "    ((null list) nil)"
+    "    ((funcall predicate (first list)) (remove-if predicate (rest list)))"
+    "    (t (cons (first list) (remove-if predicate (rest list))))))");
+
+  define_function("remove-if-not",
+    "((predicate list)"
+    "  (cond"
+    "    ((null list) nil)"
+    "    ((not (funcall predicate (first list))) (remove-if-not predicate (rest list)))"
+    "    (t (cons (first list) (remove-if-not predicate (rest list))))))");
+
+  bind_macro("let*",
+    "((bindings &rest body)"
+    "  `((lambda (&aux ,@(mapcar (lambda (b) (if (consp b) (first b) b)) bindings))"
+    "    (setq ,@(apply #'append (remove-if-not #'consp bindings)))"
+    "    ,@body)))");
 
   return true;
 }

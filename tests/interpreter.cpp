@@ -199,9 +199,6 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(nth 1 '(1 2 3))")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(nth 3 '(1 2 3))")->to_string() == "nil");
 
-  REQUIRE(interpreter.evaluate("(length nil)")->to_string() == "0");
-  REQUIRE(interpreter.evaluate("(length '(1 2 3))")->to_string() == "3");
-
   REQUIRE(interpreter.evaluate("(append)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append nil nil nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append '(1) nil '(2 3))")->to_string() == "(1 2 3)");
@@ -214,13 +211,6 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(reverse '(1 2 3))")->to_string() == "(3 2 1)");
 
   REQUIRE(interpreter.evaluate("(concatenate 'list '(1 2 3) '(4 5 6))")->to_string() == "(1 2 3 4 5 6)");
-
-  REQUIRE(interpreter.evaluate("(member 1 nil)")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");
-  REQUIRE(interpreter.evaluate("(member 4 '(1 2 3))")->to_string() == "nil");
-
-  REQUIRE(interpreter.evaluate("(remove-if-not #'consp nil)")->to_string() == "nil");
-  REQUIRE(interpreter.evaluate("(remove-if-not #'consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
 
   REQUIRE(interpreter.evaluate("(listp nil)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(consp nil)")->to_string() == "nil");
@@ -320,12 +310,29 @@ TEST_CASE("built-in functions can be called", "[functions]") {
   REQUIRE(interpreter.evaluate("(gensym)")->to_string() == "G1");
   REQUIRE(interpreter.evaluate("(gensym \"P\")")->to_string() == "P2");
 
+  REQUIRE(interpreter.evaluate("(zerop 1)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(zerop -0.0)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(evenp 0)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(evenp 3)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(oddp 0)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(oddp 3)")->to_string() == "t");
 
+  REQUIRE(interpreter.evaluate("(length nil)")->to_string() == "0");
+  REQUIRE(interpreter.evaluate("(length '(1 2 3))")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(member 1 nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");
+  REQUIRE(interpreter.evaluate("(member 4 '(1 2 3))")->to_string() == "nil");
+
   REQUIRE(interpreter.evaluate("(member-if #'evenp '(1 2 3 4))")->to_string() == "(2 3 4)");
+  REQUIRE(interpreter.evaluate("(member-if-not #'evenp '(1 2 3 4))")->to_string() == "(1 2 3 4)");
+
+  REQUIRE(interpreter.evaluate("(remove 3 '(1 2 3 3 4))")->to_string() == "(1 2 4)");
+
+  REQUIRE(interpreter.evaluate("(remove-if #'evenp '(1 2 3 4))")->to_string() == "(1 3)");
+
+  REQUIRE(interpreter.evaluate("(remove-if-not #'consp nil)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(remove-if-not #'consp '(1 2 (3 4) (5 6) 7 8))")->to_string() == "((3 4) (5 6))");
 }
 
 TEST_CASE("random primitives can be called", "[random]") {

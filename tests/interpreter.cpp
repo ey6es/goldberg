@@ -323,7 +323,7 @@ TEST_CASE("built-in functions can be called", "[functions]") {
   REQUIRE(interpreter.evaluate("(nth 1 '(1 2 3))")->to_string() == "2");
   REQUIRE(interpreter.evaluate("(nth 3 '(1 2 3))")->to_string() == "nil");
 
-  REQUIRE(interpreter.evaluate("(range 2 5)")->to_string() == "(2 3 4)");
+  REQUIRE(interpreter.evaluate("(iota 5 :start 2 :step 2)")->to_string() == "(2 4 6 8 10)");
 
   REQUIRE(interpreter.evaluate("(member 1 nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");

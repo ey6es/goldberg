@@ -1012,12 +1012,13 @@ bool Interpreter::populate_statics () {
 
   define_function("nth", "((n list) (if (= n 0) (first list) (nth (1- n) (rest list))))");
 
-  define_function("range", "((min max) (if (>= min max) nil (cons min (range (1+ min) max))))");
+  define_function("iota",
+    "((count &key (start 0) (step 1)) (if (= count 0) nil (cons start (iota (1- count) :start (+ start step) :step step))))");
 
   bind_macro("discrete",
     "((&rest clauses)"
     "  `(case (discrete-index (list ,@(mapcar #'first clauses)))"
-    "    ,@(mapcar (lambda (index clause) `(,index ,@(rest clause))) (range 0 (length clauses)) clauses)))");
+    "    ,@(mapcar (lambda (index clause) `(,index ,@(rest clause))) (iota (length clauses)) clauses)))");
 
   define_function("member",
     "((item list)"

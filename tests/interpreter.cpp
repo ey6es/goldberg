@@ -175,6 +175,9 @@ TEST_CASE("numeric expressions can be evaluated", "[numeric]") {
 
   REQUIRE(interpreter.evaluate("(max 1)")->to_string() == "1");
   REQUIRE(interpreter.evaluate("(max 2 1 3)")->to_string() == "3");
+
+  REQUIRE(interpreter.evaluate("(numberp 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(numberp 'hello)")->to_string() == "nil");
 }
 
 TEST_CASE("list expressions can be evaluated", "[list]") {
@@ -194,10 +197,6 @@ TEST_CASE("list expressions can be evaluated", "[list]") {
   REQUIRE(interpreter.evaluate("(cdr '(1 2 3))")->to_string() == "(2 3)");
   REQUIRE(interpreter.evaluate("(cdr nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(rest '(2 . 3)")->to_string() == "3");
-
-  REQUIRE(interpreter.evaluate("(nth 0 '(1 2 3))")->to_string() == "1");
-  REQUIRE(interpreter.evaluate("(nth 1 '(1 2 3))")->to_string() == "2");
-  REQUIRE(interpreter.evaluate("(nth 3 '(1 2 3))")->to_string() == "nil");
 
   REQUIRE(interpreter.evaluate("(append)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(append nil nil nil)")->to_string() == "nil");
@@ -320,6 +319,12 @@ TEST_CASE("built-in functions can be called", "[functions]") {
   REQUIRE(interpreter.evaluate("(length nil)")->to_string() == "0");
   REQUIRE(interpreter.evaluate("(length '(1 2 3))")->to_string() == "3");
 
+  REQUIRE(interpreter.evaluate("(nth 0 '(1 2 3))")->to_string() == "1");
+  REQUIRE(interpreter.evaluate("(nth 1 '(1 2 3))")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(nth 3 '(1 2 3))")->to_string() == "nil");
+
+  REQUIRE(interpreter.evaluate("(range 2 5)")->to_string() == "(2 3 4)");
+
   REQUIRE(interpreter.evaluate("(member 1 nil)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(member 2 '(1 2 3))")->to_string() == "(2 3)");
   REQUIRE(interpreter.evaluate("(member 4 '(1 2 3))")->to_string() == "nil");
@@ -341,4 +346,22 @@ TEST_CASE("random primitives can be called", "[random]") {
   REQUIRE(interpreter.evaluate("(<= 0 (random 1) 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(<= 0 (random 1 (make-random-state)) 1)")->to_string() == "t");
   REQUIRE(interpreter.evaluate("(<= 0 (random 1 (make-random-state 12345)) 1)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(<= 0 (uniform) 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 0.5 (uniform 0.5) 1)")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(<= 0.5 (uniform 0.5 0.75) 0.75)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(numberp (normal))")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(numberp (normal 0.5 0.75))")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(numberp (exponential))")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(numberp (exponential 0.5))")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(let ((b (bernoulli))) (or (equal b t) (equal b nil)))")->to_string() == "t");
+  REQUIRE(interpreter.evaluate("(bernoulli 0)")->to_string() == "nil");
+  REQUIRE(interpreter.evaluate("(bernoulli 1)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(<= 0 (discrete-index '(1 2 3 4)) 3)")->to_string() == "t");
+
+  REQUIRE(interpreter.evaluate("(discrete (0 'a) (0 'b) (1 'c))")->to_string() == "c");
 }

@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <iterator>
 #include <sstream>
 #include <unordered_set>
 #include <utility>
@@ -66,6 +67,30 @@ inline std::pair<double, double> require_2_numbers (const std::shared_ptr<Value>
     second_pair->left()->require_number(*second_pair->loc()));
 }
 
+inline double get_1_number (const std::shared_ptr<Value>& args, double default_value) {
+  double value = default_value;
+  if (*args) {
+    auto value_pair = args->require_pair(args);
+    value = value_pair->left()->require_number(*value_pair->loc());
+    value_pair->right()->require_nil();
+  }
+  return value;
+}
+
+inline std::pair<double, double> get_2_numbers (const std::shared_ptr<Value>& args, double default0, double default1) {
+  double value0 = default0, value1 = default1;
+  if (*args) {
+    auto value0_pair = args->require_pair(args);
+    value0 = value0_pair->left()->require_number(*value0_pair->loc());
+    if (*value0_pair->right()) {
+      auto value1_pair = value0_pair->right()->require_pair(value0_pair->right());
+      value1 = value1_pair->left()->require_number(*value1_pair->loc());
+      value1_pair->right()->require_nil();
+    }
+  }
+  return std::make_pair(value0, value1);
+}
+
 template<typename T>
 inline std::shared_ptr<Value> fold_numbers (const std::shared_ptr<Value>& args, double initial, const T& combine) {
   double value = initial;
@@ -108,10 +133,41 @@ std::pair<std::shared_ptr<Value>, int> last (const std::shared_ptr<Value>& list,
     : result;
 }
 
+class number_iterator : public std::iterator<std::input_iterator_tag, double> {
+public:
+
+  static number_iterator end () { return number_iterator(Interpreter::nil()); }
+
+  explicit number_iterator (const std::shared_ptr<Value>& arg) : arg_(arg) {}
+
+  bool operator== (const number_iterator& other) const { return *arg_ ? arg_ == other.arg_ : !*other.arg_; }
+  bool operator!= (const number_iterator& other) const { return !(*this == other); }
+
+  double operator* () const {
+    auto arg_pair = arg_->require_pair(arg_);
+    return arg_pair->left()->require_number(*arg_pair->loc());
+  }
+
+  number_iterator& operator++ () {
+    auto arg_pair = arg_->require_pair(arg_);
+    arg_ = arg_pair->right();
+    return *this;
+  }
+  number_iterator operator++ (int) {
+    auto tmp = *this;
+    ++*this;
+    return tmp;
+  }
+
+private:
+
+  std::shared_ptr<Value> arg_;
+};
+
 }
 
 bool Interpreter::populate_statics () {
-  auto define_constant_variable = [&](const std::string& name, const std::shared_ptr<Value>& value) {
+  auto define_constant_variable = [=](const std::string& name, const std::shared_ptr<Value>& value) {
     auto symbol_value = Interpreter::static_symbol_value(name);
     bind_variable(static_bindings_, name, std::make_shared<ConstantVariable>(symbol_value));
     static_context_->define(symbol_value, value);
@@ -641,9 +697,12 @@ bool Interpreter::populate_statics () {
   bind_native_function(static_bindings_, "min", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmin));
   });
-
   bind_native_function(static_bindings_, "max", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     return reduce_numbers(args, static_cast<double (*)(double, double)>(std::fmax));
+  });
+
+  bind_native_function(static_bindings_, "numberp", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    return std::isnan(require_1(args)->as_number()) ? nil_ : t_;
   });
 
   bind_native_function(static_bindings_, "cons", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
@@ -668,20 +727,6 @@ bool Interpreter::populate_statics () {
   };
   bind_native_function(static_bindings_, "cdr", cdr);
   bind_native_function(static_bindings_, "rest", cdr);
-
-  bind_native_function(static_bindings_, "nth", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
-    auto number_pair = args->require_pair(args);
-    auto number = static_cast<int>(number_pair->left()->require_number(*number_pair->loc()));
-    auto list_pair = number_pair->right()->require_pair(number_pair->right());
-    auto next = list_pair->left();
-    list_pair->right()->require_nil();
-    while (number >= 0 && *next) {
-      auto next_pair = next->require_pair(next);
-      if (number-- == 0) return next_pair->left();
-      next = next_pair->right();
-    }
-    return nil_;
-  });
 
   bind_native_function(static_bindings_, "append", [](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
     auto first = nil_;
@@ -854,6 +899,38 @@ bool Interpreter::populate_statics () {
     return std::make_shared<Number>(std::uniform_real_distribution<>(0.0, limit)(state->require_random_state(*state->loc())));
   });
 
+  bind_native_function(static_bindings_, "uniform", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = get_2_numbers(args, 0.0, 1.0);
+    auto state = interpreter.lookup_dynamic_value(random_state_symbol);
+    return std::make_shared<Number>(
+      std::uniform_real_distribution<>(pair.first, pair.second)(state->require_random_state(*state->loc())));
+  });
+
+  bind_native_function(static_bindings_, "normal", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto pair = get_2_numbers(args, 0.0, 1.0);
+    auto state = interpreter.lookup_dynamic_value(random_state_symbol);
+    return std::make_shared<Number>(
+      std::normal_distribution<>(pair.first, pair.second)(state->require_random_state(*state->loc())));
+  });
+
+  bind_native_function(static_bindings_, "exponential", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto state = interpreter.lookup_dynamic_value(random_state_symbol);
+    return std::make_shared<Number>(
+      std::exponential_distribution<>(get_1_number(args, 1.0))(state->require_random_state(*state->loc())));
+  });
+
+  bind_native_function(static_bindings_, "bernoulli", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto state = interpreter.lookup_dynamic_value(random_state_symbol);
+    return std::bernoulli_distribution(get_1_number(args, 0.5))(state->require_random_state(*state->loc())) ? t_ : nil_;
+  });
+
+  bind_native_function(static_bindings_, "discrete-index", [=](Interpreter& interpreter, const std::shared_ptr<Value>& args) {
+    auto state = interpreter.lookup_dynamic_value(random_state_symbol);
+    return std::make_shared<Number>(
+      std::discrete_distribution<>(number_iterator(require_1(args)), number_iterator::end())(
+        state->require_random_state(*state->loc())));
+  });
+
   class StaticInterpreter : public Interpreter {
   protected:
 
@@ -899,7 +976,7 @@ bool Interpreter::populate_statics () {
   bind_macro("incf", "((var) `(setf ,var (1+ ,var)))");
   bind_macro("decf", "((var) `(setf ,var (1- ,var)))");
 
-  auto bind_dynamic_variable = [&](const std::string& name) {
+  auto bind_dynamic_variable = [=](const std::string& name) {
     bind_variable(static_bindings_, name, std::make_shared<DynamicVariable>(Interpreter::static_symbol_value(name)));
   };
 
@@ -932,6 +1009,15 @@ bool Interpreter::populate_statics () {
   define_function("oddp", "((v) (= (mod v 2) 1))");
 
   define_function("length", "((list) (if (null list) 0 (1+ (length (rest list)))))");
+
+  define_function("nth", "((n list) (if (= n 0) (first list) (nth (1- n) (rest list))))");
+
+  define_function("range", "((min max) (if (>= min max) nil (cons min (range (1+ min) max))))");
+
+  bind_macro("discrete",
+    "((&rest clauses)"
+    "  `(case (discrete-index (list ,@(mapcar #'first clauses)))"
+    "    ,@(mapcar (lambda (index clause) `(,index ,@(rest clause))) (range 0 (length clauses)) clauses)))");
 
   define_function("member",
     "((item list)"

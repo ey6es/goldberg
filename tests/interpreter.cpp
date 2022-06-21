@@ -298,6 +298,12 @@ TEST_CASE("built-in macros can be called", "[macros]") {
   REQUIRE(interpreter.evaluate("(incf *foo*)")->to_string() == "3");
   REQUIRE(interpreter.evaluate("(decf *foo*)")->to_string() == "2");
 
+  REQUIRE(interpreter.evaluate("(defvar *bar* nil)")->to_string() == "*bar*");
+  REQUIRE(interpreter.evaluate("(push 1 *bar*)")->to_string() == "(1)");
+  REQUIRE(interpreter.evaluate("(push 2 *bar*)")->to_string() == "(2 1)");
+  REQUIRE(interpreter.evaluate("(pop *bar*)")->to_string() == "2");
+  REQUIRE(interpreter.evaluate("(pop *bar*)")->to_string() == "1");
+
   REQUIRE(interpreter.evaluate("(case *foo*)")->to_string() == "nil");
   REQUIRE(interpreter.evaluate("(case *foo* (0 'zero) ((1 2 3) 'nonzero))")->to_string() == "nonzero");
   REQUIRE(interpreter.evaluate("(case *foo* (0 'zero) ((4 5 6) 'nonzero) (t 6))")->to_string() == "6");

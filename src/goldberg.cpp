@@ -57,7 +57,7 @@ std::shared_ptr<Value> Interpreter::parse (const std::string& string, const std:
 }
 
 std::shared_ptr<Value> Interpreter::parse (std::istream& in, const std::string& filename) {
-  location loc{std::make_shared<std::string>(filename), 1, 1};
+  location loc(filename);
   std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
   while (in) {
     auto parsed = parse(in, loc);
@@ -72,7 +72,7 @@ std::shared_ptr<Value> Interpreter::evaluate (const std::string& string, const s
 }
 
 std::shared_ptr<Value> Interpreter::evaluate (std::istream& in, const std::string& filename) {
-  location loc{std::make_shared<std::string>(filename), 1, 1};
+  location loc(filename);
   std::shared_ptr<Value> last_result = std::make_shared<Nil>(std::make_shared<location>(loc));
   while (in) {
     auto result = evaluate(parse(in, loc));
@@ -177,13 +177,12 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
       case ';':
         while (in.good() && in.get() != '\n'); // consume rest of line
       case '\n':
-        loc.line++;
-        loc.column = 1;
+        loc.advance_line();
         break;
 
       case '"': {
         auto start = loc;
-        loc.column++;
+        loc.advance_column('"');
         std::string value;
         while (in.good()) {
           ch = in.get();
@@ -192,31 +191,30 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
               break;
 
             case '\n':
-              loc.line++;
-              loc.column = 1;
+              loc.advance_line();
               value += '\n';
               break;
 
             case '\\':
-              loc.column++;
+              loc.advance_column('\\');
               ch = in.get();
               switch (ch) {
                 case std::char_traits<char>::eof():
                   break;
 
                 case 'n':
+                  loc.advance_column('n');
                   value += '\n';
-                  loc.column++;
                   break;
 
                 case '"':
+                  loc.advance_column('"');
                   value += '"';
-                  loc.column++;
                   break;
 
                 case '\\':
+                  loc.advance_column('\\');
                   value += '\\';
-                  loc.column++;
                   break;
 
                 default:
@@ -231,8 +229,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
                         throw script_error("Unmatched '\"'", start);
 
                       case '\n':
-                        loc.line++;
-                        loc.column = 1;
+                        loc.advance_line();
                         break;
 
                       default:
@@ -240,7 +237,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
                           in.unget();
                           goto whitespace_ended;
                         }
-                        loc.column++;
+                        loc.advance_column(ch);
                         break;
                     }
                   }
@@ -251,12 +248,12 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
 
             case '"': {
               lexeme token{0, std::make_shared<String>(value, std::make_shared<location>(start)), start};
-              loc.column++;
+              loc.advance_column('"');
               return token;
             }
             default:
               value += static_cast<char>(ch);
-              loc.column++;
+              loc.advance_column(ch);
               break;
           }
         }
@@ -266,7 +263,8 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         int next = in.get();
         if (next == '@') {
           lexeme token{'@', nullptr, loc};
-          loc.column += 2;
+          loc.advance_column(',');
+          loc.advance_column('@');
           return token;
         }
         in.unget(); // fall through
@@ -276,14 +274,15 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
       case '\'':
       case '`': {
         lexeme token{static_cast<char>(ch), nullptr, loc};
-        loc.column++;
+        loc.advance_column(ch);
         return token;
       }
       case '#': {
         int next = in.get();
         if (next == '\'') {
           lexeme token{'#', nullptr, loc};
-          loc.column += 2;
+          loc.advance_column('#');
+          loc.advance_column('\'');
           return token;
         }
         in.unget();
@@ -294,17 +293,17 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
         in.unget();
         if (!std::isdigit(next)) { // if the next character is a digit, fall through to lex as number
           lexeme token{'.', nullptr, loc};
-          loc.column++;
+          loc.advance_column('.');
           return token;
         }
       }
       default: {
         if (std::isspace(ch)) {
-          loc.column++;
+          loc.advance_column(ch);
           break;
         }
         auto start = loc;
-        loc.column++;
+        loc.advance_column(ch);
         std::string value(1, static_cast<char>(ch));
         while (in.good()) {
           ch = in.get();
@@ -322,7 +321,7 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
                 goto token_ended;
               }
               value += static_cast<char>(ch);
-              loc.column++;
+              loc.advance_column(ch);
               break;
           }
         }
@@ -435,6 +434,8 @@ std::shared_ptr<Value> Value::apply (Interpreter& interpreter, const std::shared
 void Value::set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const {
   throw script_error("Expected variable", loc);
 }
+
+std::shared_ptr<location> Value::empty_loc_ = std::make_shared<location>();
 
 std::string Number::to_string () const {
   std::ostringstream out;
@@ -867,6 +868,23 @@ bool Invocation::set_dynamic_value (const std::shared_ptr<std::string>& symbol_v
   if (pair == values_.end()) return false;
   pair->second = value;
   return true;
+}
+
+void location::advance_column (int ch) {
+  ++column_;
+  *contents_ += static_cast<char>(ch);
+}
+
+void location::advance_line () {
+  ++line_;
+  column_ = 1;
+  contents_ = std::make_shared<std::string>();
+}
+
+std::string location::to_string () const {
+  return *filename_ + " line " + std::to_string(line_) + ", column " + std::to_string(column_) + ":\n" +
+    *contents_ + '\n' +
+    std::string(column_ - 1, ' ') + '^';
 }
 
 }

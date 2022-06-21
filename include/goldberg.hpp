@@ -103,7 +103,7 @@ class Pair;
 class Value {
 public:
 
-  explicit Value (const std::shared_ptr<location>& loc = nullptr) : loc_(loc) {}
+  explicit Value (const std::shared_ptr<location>& loc = empty_loc_) : loc_(loc) {}
   virtual ~Value () {}
 
   const std::shared_ptr<location>& loc () const { return loc_; }
@@ -152,6 +152,10 @@ public:
 
   virtual void set_value (Interpreter& interpreter, const std::shared_ptr<Value>& value, const location& loc) const;
 
+protected:
+
+  static std::shared_ptr<location> empty_loc_;
+
 private:
 
   std::shared_ptr<location> loc_;
@@ -160,7 +164,7 @@ private:
 class True : public Value {
 public:
 
-  explicit True (const std::shared_ptr<location>& loc = nullptr) : Value(loc) {}
+  explicit True (const std::shared_ptr<location>& loc = empty_loc_) : Value(loc) {}
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_true(); }
   bool equals_true () const override { return true; }
@@ -171,7 +175,7 @@ public:
 class Nil : public Value {
 public:
 
-  explicit Nil (const std::shared_ptr<location>& loc = nullptr) : Value(loc) {}
+  explicit Nil (const std::shared_ptr<location>& loc = empty_loc_) : Value(loc) {}
 
   bool equals (const std::shared_ptr<Value>& other) const override { return other->equals_nil(); }
   bool equals_nil () const override { return true; }
@@ -183,7 +187,7 @@ public:
 class Number : public Value {
 public:
 
-  explicit Number (double value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
+  explicit Number (double value, const std::shared_ptr<location>& loc = empty_loc_) : Value(loc), value_(value) {}
 
   double as_number () const override { return value_; }
 
@@ -200,7 +204,7 @@ private:
 class String : public Value {
 public:
 
-  explicit String (const std::string& value, const std::shared_ptr<location>& loc = nullptr) : Value(loc), value_(value) {}
+  explicit String (const std::string& value, const std::shared_ptr<location>& loc = empty_loc_) : Value(loc), value_(value) {}
 
   const std::string& require_string (const location& loc) const override { return value_; }
 
@@ -218,7 +222,7 @@ private:
 class Symbol : public Value {
 public:
 
-  explicit Symbol (const std::shared_ptr<std::string>& value, const std::shared_ptr<location>& loc = nullptr)
+  explicit Symbol (const std::shared_ptr<std::string>& value, const std::shared_ptr<location>& loc = empty_loc_)
     : Value(loc), value_(value) {}
 
   std::shared_ptr<std::string> as_symbol () const override { return value_; }
@@ -241,8 +245,9 @@ private:
 class Pair : public Value {
 public:
 
-  Pair (const std::shared_ptr<Value>& left, const std::shared_ptr<Value>& right, const std::shared_ptr<location>& loc = nullptr)
-    : Value(loc), left_(left), right_(right) {}
+  Pair (
+    const std::shared_ptr<Value>& left, const std::shared_ptr<Value>& right, const std::shared_ptr<location>& loc = empty_loc_)
+      : Value(loc), left_(left), right_(right) {}
 
   const std::shared_ptr<Value>& left () const { return left_; }
   const std::shared_ptr<Value>& right () const { return right_; }
@@ -406,8 +411,7 @@ private:
 class Variable : public Value {
 public:
 
-  Variable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc)
-    : Value(loc), symbol_value_(symbol_value) {}
+  Variable (const std::shared_ptr<std::string>& symbol_value) : symbol_value_(symbol_value) {}
 
   const std::shared_ptr<std::string>& symbol_value () const { return symbol_value_; }
 
@@ -423,8 +427,7 @@ private:
 class ConstantVariable : public Variable {
 public:
 
-  explicit ConstantVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
-    : Variable(symbol_value, loc) {}
+  explicit ConstantVariable (const std::shared_ptr<std::string>& symbol_value) : Variable(symbol_value) {}
 
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
@@ -434,8 +437,7 @@ public:
 class LexicalVariable : public Variable {
 public:
 
-  explicit LexicalVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
-    : Variable(symbol_value, loc) {}
+  explicit LexicalVariable (const std::shared_ptr<std::string>& symbol_value) : Variable(symbol_value) {}
 
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
@@ -445,8 +447,7 @@ public:
 class DynamicVariable : public Variable {
 public:
 
-  explicit DynamicVariable (const std::shared_ptr<std::string>& symbol_value, const std::shared_ptr<location>& loc = nullptr)
-    : Variable(symbol_value, loc) {}
+  explicit DynamicVariable (const std::shared_ptr<std::string>& symbol_value) : Variable(symbol_value) {}
 
   std::shared_ptr<Value> evaluate (Interpreter& interpreter, const std::shared_ptr<Value>& self) const override;
 
@@ -499,12 +500,26 @@ private:
   std::unordered_map<std::shared_ptr<std::string>, std::shared_ptr<Value>> values_;
 };
 
-struct location {
-  std::shared_ptr<std::string> filename;
-  int line;
-  int column;
+class location {
+public:
 
-  std::string to_string () const { return *filename + ' ' + std::to_string(line) + ':' + std::to_string(column); }
+  location (const std::string& filename)
+    : filename_(std::make_shared<std::string>(filename)), line_(1), column_(1), contents_(std::make_shared<std::string>()) {}
+  location () {}
+
+  void advance_column (int ch);
+  void advance_line ();
+
+  bool is_empty () const { return !filename_; }
+
+  std::string to_string () const;
+
+private:
+
+  std::shared_ptr<std::string> filename_;
+  int line_;
+  int column_;
+  std::shared_ptr<std::string> contents_;
 };
 
 struct lexeme {
@@ -516,7 +531,8 @@ struct lexeme {
 class script_error : public std::exception {
 public:
 
-  script_error (const std::string& what, const location& loc) : what_(what + " at " + loc.to_string()) {}
+  script_error (const std::string& what, const location& loc)
+    : what_(loc.is_empty() ? what : what + " at " + loc.to_string()) {}
 
   const char* what () const noexcept override { return what_.c_str(); }
 

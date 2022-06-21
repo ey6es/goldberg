@@ -991,6 +991,10 @@ bool Interpreter::populate_statics () {
   bind_dynamic_variable("*gensym-counter*");
   define_function("gensym", "((&optional (prefix \"G\")) (make-symbol (format nil \"~a~a\" prefix (incf *gensym-counter*))))");
 
+  bind_macro("push", "((item place) `(setq ,place (cons ,item ,place)))");
+  bind_macro("pop",
+    "((place &aux (firstvar (gensym))) `(let ((,firstvar (first ,place))) (setq ,place (rest ,place)) ,firstvar))");
+
   bind_macro("case",
     "((keyform &rest clauses &aux (keyvar (gensym)))"
     "  `(let ((,keyvar ,keyform)) (cond"

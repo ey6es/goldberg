@@ -869,12 +869,13 @@ int location::get_char (std::istream& in) {
 }
 
 void location::unget_char (std::istream& in) {
-  if (column_ > 0) --column_;
-  else in.unget();
+  if (column_ > 0) {
+    if (contents_->at(--column_) == '\n') --line_;
+  } else in.unget();
 }
 
 std::string location::to_string () const {
-  return *filename_ + " line " + std::to_string(line_ + 1) + ", column " + std::to_string(column_ + 1) + ":\n" +
+  return *filename_ + ", line " + std::to_string(line_ + 1) + ", column " + std::to_string(column_ + 1) + ":\n" +
     (contents_->length() > 0 && contents_->back() == '\n' ? *contents_ : *contents_ + '\n') +
     std::string(column_, ' ') + '^';
 }

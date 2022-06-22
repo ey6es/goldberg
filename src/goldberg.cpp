@@ -168,52 +168,45 @@ std::shared_ptr<Value> Interpreter::parse_special (
 }
 
 lexeme Interpreter::lex (std::istream& in, location& loc) {
-  while (in.good()) {
-    int ch = in.get();
+  while (loc.good(in)) {
+    auto start = loc;
+    int ch = loc.get_char(in);
     switch (ch) {
       case std::char_traits<char>::eof():
         break;
 
       case ';':
-        while (in.good() && in.get() != '\n'); // consume rest of line
+        while (loc.good(in) && loc.get_char(in) != '\n'); // consume rest of line
       case '\n':
-        loc.advance_line();
         break;
 
       case '"': {
-        auto start = loc;
-        loc.advance_column('"');
         std::string value;
-        while (in.good()) {
-          ch = in.get();
+        while (loc.good(in)) {
+          ch = loc.get_char(in);
           switch (ch) {
             case std::char_traits<char>::eof():
               break;
 
             case '\n':
-              loc.advance_line();
               value += '\n';
               break;
 
             case '\\':
-              loc.advance_column('\\');
-              ch = in.get();
+              ch = loc.get_char(in);
               switch (ch) {
                 case std::char_traits<char>::eof():
                   break;
 
                 case 'n':
-                  loc.advance_column('n');
                   value += '\n';
                   break;
 
                 case '"':
-                  loc.advance_column('"');
                   value += '"';
                   break;
 
                 case '\\':
-                  loc.advance_column('\\');
                   value += '\\';
                   break;
 
@@ -221,23 +214,21 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
                   if (!std::isspace(ch)) {
                     throw script_error("Unrecognized escape code '" + static_cast<char>(ch) + '\'', loc);
                   }
-                  in.unget();
-                  while (in.good()) { // consume whitespace
-                    ch = in.get();
+                  loc.unget_char(in);
+                  while (loc.good(in)) { // consume whitespace
+                    ch = loc.get_char(in);
                     switch (ch) {
                       case std::char_traits<char>::eof():
                         throw script_error("Unmatched '\"'", start);
 
                       case '\n':
-                        loc.advance_line();
                         break;
 
                       default:
                         if (!std::isspace(ch)) {
-                          in.unget();
+                          loc.unget_char(in);
                           goto whitespace_ended;
                         }
-                        loc.advance_column(ch);
                         break;
                     }
                   }
@@ -246,82 +237,58 @@ lexeme Interpreter::lex (std::istream& in, location& loc) {
               }
               break;
 
-            case '"': {
-              lexeme token{0, std::make_shared<String>(value, std::make_shared<location>(start)), start};
-              loc.advance_column('"');
-              return token;
-            }
+            case '"':
+              return {0, std::make_shared<String>(value, std::make_shared<location>(start)), start};
+
             default:
               value += static_cast<char>(ch);
-              loc.advance_column(ch);
               break;
           }
         }
         throw script_error("Unmatched '\"'", start);
       }
       case ',': {
-        int next = in.get();
-        if (next == '@') {
-          lexeme token{'@', nullptr, loc};
-          loc.advance_column(',');
-          loc.advance_column('@');
-          return token;
-        }
-        in.unget(); // fall through
+        int next = loc.get_char(in);
+        if (next == '@') return {'@', nullptr, start};
+        loc.unget_char(in); // fall through
       }
       case '(':
       case ')':
       case '\'':
-      case '`': {
-        lexeme token{static_cast<char>(ch), nullptr, loc};
-        loc.advance_column(ch);
-        return token;
-      }
+      case '`':
+        return {static_cast<char>(ch), nullptr, start};
+
       case '#': {
-        int next = in.get();
-        if (next == '\'') {
-          lexeme token{'#', nullptr, loc};
-          loc.advance_column('#');
-          loc.advance_column('\'');
-          return token;
-        }
-        in.unget();
+        int next = loc.get_char(in);
+        if (next == '\'') return {'#', nullptr, start};
+        loc.unget_char(in);
         break;
       }
       case '.': {
-        int next = in.get();
-        in.unget();
-        if (!std::isdigit(next)) { // if the next character is a digit, fall through to lex as number
-          lexeme token{'.', nullptr, loc};
-          loc.advance_column('.');
-          return token;
-        }
+        int next = loc.get_char(in);
+        loc.unget_char(in);
+        if (!std::isdigit(next)) return {'.', nullptr, start};
+        // if the next character is a digit, fall through to lex as number
       }
       default: {
-        if (std::isspace(ch)) {
-          loc.advance_column(ch);
-          break;
-        }
-        auto start = loc;
-        loc.advance_column(ch);
+        if (std::isspace(ch)) break;
         std::string value(1, static_cast<char>(ch));
-        while (in.good()) {
-          ch = in.get();
+        while (loc.good(in)) {
+          ch = loc.get_char(in);
           switch (ch) {
             case std::char_traits<char>::eof():
               goto token_ended;
 
             case ')':
-              in.unget();
+              loc.unget_char(in);
               goto token_ended;
 
             default:
               if (std::isspace(ch)) {
-                in.unget();
+                loc.unget_char(in);
                 goto token_ended;
               }
               value += static_cast<char>(ch);
-              loc.advance_column(ch);
               break;
           }
         }
@@ -870,21 +837,46 @@ bool Invocation::set_dynamic_value (const std::shared_ptr<std::string>& symbol_v
   return true;
 }
 
-void location::advance_column (int ch) {
-  ++column_;
-  *contents_ += static_cast<char>(ch);
+bool location::good (std::istream& in) const {
+  return column_ < contents_->length() || in.good();
 }
 
-void location::advance_line () {
-  ++line_;
-  column_ = 1;
-  contents_ = std::make_shared<std::string>();
+int location::get_char (std::istream& in) {
+  if (column_ >= contents_->length()) {
+    column_ = 0;
+    contents_->clear();
+    while (in.good()) {
+      int ch = in.get();
+      switch (ch) {
+        case std::char_traits<char>::eof():
+          goto line_ended;
+
+        case '\n':
+          *contents_ += '\n';
+          goto line_ended;
+
+        default:
+          *contents_ += static_cast<char>(ch);
+          break;
+      }
+    }
+    line_ended:
+    if (contents_->empty()) return std::char_traits<char>::eof();
+  }
+  char ch = contents_->at(column_++);
+  if (ch == '\n') ++line_;
+  return ch;
+}
+
+void location::unget_char (std::istream& in) {
+  if (column_ > 0) --column_;
+  else in.unget();
 }
 
 std::string location::to_string () const {
-  return *filename_ + " line " + std::to_string(line_) + ", column " + std::to_string(column_) + ":\n" +
-    *contents_ + '\n' +
-    std::string(column_ - 1, ' ') + '^';
+  return *filename_ + " line " + std::to_string(line_ + 1) + ", column " + std::to_string(column_ + 1) + ":\n" +
+    (contents_->length() > 0 && contents_->back() == '\n' ? *contents_ : *contents_ + '\n') +
+    std::string(column_, ' ') + '^';
 }
 
 }

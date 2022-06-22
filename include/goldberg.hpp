@@ -504,11 +504,13 @@ class location {
 public:
 
   location (const std::string& filename)
-    : filename_(std::make_shared<std::string>(filename)), line_(1), column_(1), contents_(std::make_shared<std::string>()) {}
+    : filename_(std::make_shared<std::string>(filename)), line_(0), column_(0), contents_(std::make_shared<std::string>()) {}
   location () {}
 
-  void advance_column (int ch);
-  void advance_line ();
+  bool good (std::istream& in) const;
+
+  int get_char (std::istream& in);
+  void unget_char (std::istream& in);
 
   bool is_empty () const { return !filename_; }
 
